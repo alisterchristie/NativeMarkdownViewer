@@ -37,13 +37,29 @@ type
   TMarkDownBlockList = TObjectList<TMarkDownBlock>;
   TMarkDownLinkHitList = TList<TMarkDownLinkHit>;
 
+  TMarkDownTextRun = record
+    FontName: string;
+    FontSize: Integer;
+    FontStyle: TFontStyles;
+    Rect: TRect;
+    StartIndex: Integer;
+    Text: string;
+  end;
+
+  TMarkDownTextRunList = TList<TMarkDownTextRun>;
+
   TMarkDownViewer = class(TCustomControl)
   private
     FMarkdown: TStringList;
     FBlocks: TMarkDownBlockList;
     FLinkHits: TMarkDownLinkHitList;
+    FTextRuns: TMarkDownTextRunList;
+    FSelectableText: string;
     FScrollPos: Integer;
     FContentHeight: Integer;
+    FSelectionAnchor: Integer;
+    FSelectionCaret: Integer;
+    FSelecting: Boolean;
     FLinkColor: TColor;
     FCodeBackgroundColor: TColor;
     FQuoteBarColor: TColor;
@@ -54,8 +70,13 @@ type
     FOnLinkClick: TMarkDownLinkClickEvent;
     function GetMarkdown: TStrings;
     function GetMarkdownText: string;
+    function HasSelection: Boolean;
+    function HitTestTextPosition(X, Y: Integer): Integer;
     function IsMarkdownStored: Boolean;
+    procedure ClearSelection;
+    procedure CopySelectionToClipboard;
     procedure MarkdownChanged(Sender: TObject);
+    procedure SelectAllText;
     procedure SetBasePath(const Value: string);
     procedure SetCodeBackgroundColor(const Value: TColor);
     procedure SetLinkColor(const Value: TColor);
@@ -76,6 +97,7 @@ type
     procedure KeyDown(var Key: Word; Shift: TShiftState); override;
     procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Integer); override;
     procedure MouseMove(Shift: TShiftState; X, Y: Integer); override;
+    procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: Integer); override;
     procedure Paint; override;
     procedure Resize; override;
   public
@@ -128,6 +150,7 @@ uses
   System.StrUtils,
   System.SysUtils,
   Winapi.ShellAPI,
+  Vcl.Clipbrd,
   Vcl.Imaging.jpeg,
   Vcl.Imaging.pngimage;
 
@@ -834,10 +857,12 @@ begin
   FLinkReferences.CaseSensitive := False;
   FBlocks := TMarkDownBlockList.Create(True);
   FLinkHits := TMarkDownLinkHitList.Create;
+  FTextRuns := TMarkDownTextRunList.Create;
 end;
 
 destructor TMarkDownViewer.Destroy;
 begin
+  FTextRuns.Free;
   FLinkHits.Free;
   FBlocks.Free;
   FLinkReferences.Free;
@@ -863,26 +888,43 @@ var
 begin
   inherited KeyDown(Key, Shift);
   Handled := True;
-  case Key of
-    VK_UP:
-      SetScrollPosition(FScrollPos - 24);
-    VK_DOWN:
-      SetScrollPosition(FScrollPos + 24);
-    VK_PRIOR:
-      SetScrollPosition(FScrollPos - ClientHeight);
-    VK_NEXT:
-      SetScrollPosition(FScrollPos + ClientHeight);
-    VK_HOME:
-      SetScrollPosition(0);
-    VK_END:
-      SetScrollPosition(FContentHeight);
-    VK_SPACE:
-      if ssShift in Shift then
-        SetScrollPosition(FScrollPos - ClientHeight)
-      else
-        SetScrollPosition(FScrollPos + ClientHeight);
+
+  if ssCtrl in Shift then
+  begin
+    case Key of
+      Ord('A'):
+        SelectAllText;
+      Ord('C'), VK_INSERT:
+        CopySelectionToClipboard;
+    else
+      Handled := False;
+    end;
+  end
   else
-    Handled := False;
+  begin
+    case Key of
+      VK_UP:
+        SetScrollPosition(FScrollPos - 24);
+      VK_DOWN:
+        SetScrollPosition(FScrollPos + 24);
+      VK_PRIOR:
+        SetScrollPosition(FScrollPos - ClientHeight);
+      VK_NEXT:
+        SetScrollPosition(FScrollPos + ClientHeight);
+      VK_HOME:
+        SetScrollPosition(0);
+      VK_END:
+        SetScrollPosition(FContentHeight);
+      VK_ESCAPE:
+        ClearSelection;
+      VK_SPACE:
+        if ssShift in Shift then
+          SetScrollPosition(FScrollPos - ClientHeight)
+        else
+          SetScrollPosition(FScrollPos + ClientHeight);
+    else
+      Handled := False;
+    end;
   end;
 
   if Handled then
@@ -899,9 +941,94 @@ begin
   Result := FMarkdown;
 end;
 
+function TMarkDownViewer.HasSelection: Boolean;
+begin
+  Result := FSelectionAnchor <> FSelectionCaret;
+end;
+
+function TMarkDownViewer.HitTestTextPosition(X, Y: Integer): Integer;
+var
+  I: Integer;
+  C: Integer;
+  Run: TMarkDownTextRun;
+  PrefixWidth: Integer;
+  CharMid: Integer;
+  LineCandidate: Integer;
+begin
+  Result := 0;
+  LineCandidate := -1;
+  if (FTextRuns = nil) or (FTextRuns.Count = 0) then
+    Exit;
+
+  for I := 0 to FTextRuns.Count - 1 do
+  begin
+    Run := FTextRuns[I];
+    if (Y >= Run.Rect.Top) and (Y <= Run.Rect.Bottom) then
+    begin
+      if X < Run.Rect.Left then
+        Exit(Run.StartIndex);
+
+      if X <= Run.Rect.Right then
+      begin
+        Canvas.Font.Assign(Font);
+        Canvas.Font.Name := Run.FontName;
+        Canvas.Font.Size := Run.FontSize;
+        Canvas.Font.Style := Run.FontStyle;
+        for C := 1 to Length(Run.Text) do
+        begin
+          PrefixWidth := Canvas.TextWidth(Copy(Run.Text, 1, C - 1));
+          CharMid := Run.Rect.Left + PrefixWidth +
+            (Canvas.TextWidth(Copy(Run.Text, C, 1)) div 2);
+          if X < CharMid then
+            Exit(Run.StartIndex + C - 1);
+        end;
+        Exit(Run.StartIndex + Length(Run.Text));
+      end;
+
+      LineCandidate := Run.StartIndex + Length(Run.Text);
+    end;
+  end;
+
+  if LineCandidate >= 0 then
+    Exit(LineCandidate);
+
+  if Y < FTextRuns[0].Rect.Top then
+    Exit(0);
+
+  Result := Length(FSelectableText);
+end;
+
 function TMarkDownViewer.IsMarkdownStored: Boolean;
 begin
   Result := FMarkdown.Count > 0;
+end;
+
+procedure TMarkDownViewer.ClearSelection;
+begin
+  if HasSelection then
+  begin
+    FSelectionAnchor := 0;
+    FSelectionCaret := 0;
+    Invalidate;
+  end
+  else
+  begin
+    FSelectionAnchor := 0;
+    FSelectionCaret := 0;
+  end;
+end;
+
+procedure TMarkDownViewer.CopySelectionToClipboard;
+var
+  SelStart: Integer;
+  SelEnd: Integer;
+begin
+  if not HasSelection then
+    Exit;
+
+  SelStart := Min(FSelectionAnchor, FSelectionCaret);
+  SelEnd := Max(FSelectionAnchor, FSelectionCaret);
+  Clipboard.AsText := Copy(FSelectableText, SelStart + 1, SelEnd - SelStart);
 end;
 
 procedure TMarkDownViewer.LoadFromFile(const FileName: string);
@@ -919,19 +1046,75 @@ begin
   FBlocks.Free;
   FBlocks := Blocks;
   FScrollPos := 0;
+  FSelectionAnchor := 0;
+  FSelectionCaret := 0;
+  FSelectableText := '';
+  if FTextRuns <> nil then
+    FTextRuns.Clear;
   Invalidate;
   UpdateScrollBar;
 end;
 
 procedure TMarkDownViewer.MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
-var
-  I: Integer;
-  Hit: TMarkDownLinkHit;
 begin
   inherited;
   if CanFocus then
     SetFocus;
   if Button <> mbLeft then
+    Exit;
+
+  FSelectionAnchor := HitTestTextPosition(X, Y);
+  FSelectionCaret := FSelectionAnchor;
+  FSelecting := True;
+  MouseCapture := True;
+  Invalidate;
+end;
+
+procedure TMarkDownViewer.MouseMove(Shift: TShiftState; X, Y: Integer);
+var
+  I: Integer;
+  IsLink: Boolean;
+begin
+  inherited;
+  if FSelecting then
+  begin
+    FSelectionCaret := HitTestTextPosition(X, Y);
+    Invalidate;
+  end;
+
+  IsLink := False;
+  if FLinkHits <> nil then
+    for I := 0 to FLinkHits.Count - 1 do
+      if PtInRect(FLinkHits[I].Rect, Point(X, Y)) then
+      begin
+        IsLink := True;
+        Break;
+      end;
+
+  if IsLink then
+    Cursor := crHandPoint
+  else
+    Cursor := crDefault;
+end;
+
+procedure TMarkDownViewer.MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+var
+  I: Integer;
+  Hit: TMarkDownLinkHit;
+begin
+  inherited;
+  if Button <> mbLeft then
+    Exit;
+
+  if FSelecting then
+  begin
+    FSelectionCaret := HitTestTextPosition(X, Y);
+    FSelecting := False;
+    MouseCapture := False;
+    Invalidate;
+  end;
+
+  if HasSelection then
     Exit;
 
   if FLinkHits <> nil then
@@ -947,27 +1130,6 @@ begin
         Break;
       end;
     end;
-end;
-
-procedure TMarkDownViewer.MouseMove(Shift: TShiftState; X, Y: Integer);
-var
-  I: Integer;
-  IsLink: Boolean;
-begin
-  inherited;
-  IsLink := False;
-  if FLinkHits <> nil then
-    for I := 0 to FLinkHits.Count - 1 do
-      if PtInRect(FLinkHits[I].Rect, Point(X, Y)) then
-      begin
-        IsLink := True;
-        Break;
-      end;
-
-  if IsLink then
-    Cursor := crHandPoint
-  else
-    Cursor := crDefault;
 end;
 
 procedure TMarkDownViewer.Paint;
@@ -989,6 +1151,135 @@ var
   Bullet: string;
   ListLeft: Integer;
   TextIndent: Integer;
+  LineTextStart: Integer;
+  OldBkMode: Integer;
+
+  function SelectionRange(out SelStart, SelEnd: Integer): Boolean;
+  begin
+    Result := HasSelection;
+    if Result then
+    begin
+      SelStart := Min(FSelectionAnchor, FSelectionCaret);
+      SelEnd := Max(FSelectionAnchor, FSelectionCaret);
+    end
+    else
+    begin
+      SelStart := 0;
+      SelEnd := 0;
+    end;
+  end;
+
+  function AddSelectableRun(const ARect: TRect; const AText: string): Integer;
+  var
+    Run: TMarkDownTextRun;
+  begin
+    Result := Length(FSelectableText);
+    if AText = '' then
+      Exit;
+
+    Run.Rect := ARect;
+    Run.FontName := Canvas.Font.Name;
+    Run.FontSize := Canvas.Font.Size;
+    Run.FontStyle := Canvas.Font.Style;
+    Run.StartIndex := Result;
+    Run.Text := AText;
+    FTextRuns.Add(Run);
+    FSelectableText := FSelectableText + AText;
+  end;
+
+  procedure AddSelectableText(const AText: string);
+  begin
+    if AText <> '' then
+      FSelectableText := FSelectableText + AText;
+  end;
+
+  procedure AddSelectableBreak;
+  begin
+    if FSelectableText = '' then
+      Exit;
+    if not EndsText(sLineBreak, FSelectableText) then
+      FSelectableText := FSelectableText + sLineBreak;
+  end;
+
+  procedure DrawSelectionBackground(const AText: string; TextX, TextY, TextHeight, TextStart: Integer);
+  var
+    SelStart: Integer;
+    SelEnd: Integer;
+    LocalStart: Integer;
+    LocalEnd: Integer;
+    HighlightRect: TRect;
+    OldColor: TColor;
+    OldStyle: TBrushStyle;
+  begin
+    if not SelectionRange(SelStart, SelEnd) then
+      Exit;
+
+    LocalStart := Max(0, SelStart - TextStart);
+    LocalEnd := Min(Length(AText), SelEnd - TextStart);
+    if LocalStart >= LocalEnd then
+      Exit;
+
+    HighlightRect := Rect(
+      TextX + Canvas.TextWidth(Copy(AText, 1, LocalStart)),
+      TextY,
+      TextX + Canvas.TextWidth(Copy(AText, 1, LocalEnd)),
+      TextY + TextHeight);
+
+    OldColor := Canvas.Brush.Color;
+    OldStyle := Canvas.Brush.Style;
+    Canvas.Brush.Color := clHighlight;
+    Canvas.Brush.Style := bsSolid;
+    Canvas.FillRect(HighlightRect);
+    Canvas.Brush.Color := OldColor;
+    Canvas.Brush.Style := OldStyle;
+  end;
+
+  procedure DrawSelectableText(const AText: string; TextX, TextY, TextStart: Integer);
+  var
+    SelStart: Integer;
+    SelEnd: Integer;
+    LocalStart: Integer;
+    LocalEnd: Integer;
+    XPos: Integer;
+    PrefixText: string;
+    SelectedText: string;
+    SuffixText: string;
+    OldFontColor: TColor;
+  begin
+    if not SelectionRange(SelStart, SelEnd) then
+    begin
+      Canvas.TextOut(TextX, TextY, AText);
+      Exit;
+    end;
+
+    LocalStart := Max(0, SelStart - TextStart);
+    LocalEnd := Min(Length(AText), SelEnd - TextStart);
+    if LocalStart >= LocalEnd then
+    begin
+      Canvas.TextOut(TextX, TextY, AText);
+      Exit;
+    end;
+
+    PrefixText := Copy(AText, 1, LocalStart);
+    SelectedText := Copy(AText, LocalStart + 1, LocalEnd - LocalStart);
+    SuffixText := Copy(AText, LocalEnd + 1, MaxInt);
+
+    XPos := TextX;
+    if PrefixText <> '' then
+    begin
+      Canvas.TextOut(XPos, TextY, PrefixText);
+      Inc(XPos, Canvas.TextWidth(PrefixText));
+    end;
+
+    OldFontColor := Canvas.Font.Color;
+    Canvas.Font.Color := clHighlightText;
+    Canvas.TextOut(XPos, TextY, SelectedText);
+    Canvas.Font.Color := OldFontColor;
+    Inc(XPos, Canvas.TextWidth(SelectedText));
+
+    if SuffixText <> '' then
+      Canvas.TextOut(XPos, TextY, SuffixText);
+  end;
 
   procedure AssignBaseFont(Style: TFontStyles; SizeDelta: Integer; const FontName: string = '');
   begin
@@ -1056,6 +1347,7 @@ var
     OldBrushColor: TColor;
     OldBrushStyle: TBrushStyle;
     OldBkMode: Integer;
+    TextStart: Integer;
 
     procedure DrawSearchHighlights(const AText: string; TextX, TextY, TextHeight: Integer);
     var
@@ -1154,34 +1446,41 @@ var
         AtomWidth := Canvas.TextWidth(Atom);
         if (Trim(Atom) <> '') and (LineUsed > 0) and (LineUsed + AtomWidth > AWidth) then
         begin
+          if ADraw then
+            AddSelectableBreak;
           Inc(YPos, LineHeight);
           LineUsed := 0;
           X := AlignedX(TokenIndex, AtomStart);
           AssignInlineFont(ATokens[TokenIndex].Kind, BaseStyle, SizeDelta);
         end;
 
-        if (ADraw) and (YPos + LineHeight >= 0) and (YPos <= ClientHeight) then
+        if ADraw then
         begin
           AtomRect := Rect(X, YPos, X + AtomWidth, YPos + LineHeight);
-          if ATokens[TokenIndex].Kind = ikCode then
+          TextStart := AddSelectableRun(AtomRect, Atom);
+          if (YPos + LineHeight >= 0) and (YPos <= ClientHeight) then
           begin
-            OldBrushColor := Canvas.Brush.Color;
-            OldBrushStyle := Canvas.Brush.Style;
-            Canvas.Brush.Color := FCodeBackgroundColor;
-            Canvas.Brush.Style := bsSolid;
-            Canvas.FillRect(Rect(AtomRect.Left - 2, AtomRect.Top + 1, AtomRect.Right + 2, AtomRect.Bottom - 1));
-            Canvas.Brush.Color := OldBrushColor;
-            Canvas.Brush.Style := OldBrushStyle;
-          end;
-          DrawSearchHighlights(Atom, X, YPos + 2, LineHeight - 2);
-          OldBkMode := SetBkMode(Canvas.Handle, TRANSPARENT);
-          Canvas.TextOut(X, YPos + 2, Atom);
-          SetBkMode(Canvas.Handle, OldBkMode);
-          if (ATokens[TokenIndex].Kind = ikLink) and (Trim(Atom) <> '') and (FLinkHits <> nil) then
-          begin
-            Hit.Rect := AtomRect;
-            Hit.Url := ATokens[TokenIndex].Url;
-            FLinkHits.Add(Hit);
+            if ATokens[TokenIndex].Kind = ikCode then
+            begin
+              OldBrushColor := Canvas.Brush.Color;
+              OldBrushStyle := Canvas.Brush.Style;
+              Canvas.Brush.Color := FCodeBackgroundColor;
+              Canvas.Brush.Style := bsSolid;
+              Canvas.FillRect(Rect(AtomRect.Left - 2, AtomRect.Top + 1, AtomRect.Right + 2, AtomRect.Bottom - 1));
+              Canvas.Brush.Color := OldBrushColor;
+              Canvas.Brush.Style := OldBrushStyle;
+            end;
+            DrawSearchHighlights(Atom, X, YPos + 2, LineHeight - 2);
+            DrawSelectionBackground(Atom, X, YPos + 2, LineHeight - 2, TextStart);
+            OldBkMode := SetBkMode(Canvas.Handle, TRANSPARENT);
+            DrawSelectableText(Atom, X, YPos + 2, TextStart);
+            SetBkMode(Canvas.Handle, OldBkMode);
+            if (ATokens[TokenIndex].Kind = ikLink) and (Trim(Atom) <> '') and (FLinkHits <> nil) then
+            begin
+              Hit.Rect := AtomRect;
+              Hit.Url := ATokens[TokenIndex].Url;
+              FLinkHits.Add(Hit);
+            end;
           end;
         end;
         Inc(X, AtomWidth);
@@ -1413,8 +1712,11 @@ var
           finally
             CellTokens.Free;
           end;
+          if Col < ColCount - 1 then
+            AddSelectableText(#9);
           Inc(X, ColWidths[Col]);
         end;
+        AddSelectableBreak;
         Inc(RowTop, RowHeight);
       end;
 
@@ -1431,6 +1733,8 @@ begin
   Canvas.FillRect(ClientRect);
 
   FLinkHits.Clear;
+  FTextRuns.Clear;
+  FSelectableText := '';
 
   Blocks := FBlocks;
   Y := MarkdownPadding - FScrollPos;
@@ -1518,7 +1822,25 @@ begin
             Canvas.FillRect(R);
             Canvas.Brush.Style := bsClear;
             for LineIndex := 0 to Lines.Count - 1 do
-              Canvas.TextOut(TextLeft + 8, Y + 8 + (LineIndex * LineHeight), Lines[LineIndex]);
+            begin
+              LineTextStart := AddSelectableRun(
+                Rect(TextLeft + 8, Y + 8 + (LineIndex * LineHeight),
+                  TextLeft + 8 + Canvas.TextWidth(Lines[LineIndex]),
+                  Y + 8 + (LineIndex * LineHeight) + LineHeight),
+                Lines[LineIndex]);
+              if (Y + 8 + (LineIndex * LineHeight) + LineHeight >= 0) and
+                (Y + 8 + (LineIndex * LineHeight) <= ClientHeight) then
+              begin
+                DrawSelectionBackground(Lines[LineIndex], TextLeft + 8,
+                  Y + 8 + (LineIndex * LineHeight), LineHeight, LineTextStart);
+                OldBkMode := SetBkMode(Canvas.Handle, TRANSPARENT);
+                DrawSelectableText(Lines[LineIndex], TextLeft + 8,
+                  Y + 8 + (LineIndex * LineHeight), LineTextStart);
+                SetBkMode(Canvas.Handle, OldBkMode);
+              end;
+              if LineIndex < Lines.Count - 1 then
+                AddSelectableBreak;
+            end;
             Canvas.Brush.Style := bsSolid;
           finally
             Lines.Free;
@@ -1541,6 +1863,7 @@ begin
       end;
       Inc(Y, TokenHeight + ParagraphSpacing);
     end;
+    AddSelectableBreak;
   end;
 
   TotalHeight := Y + FScrollPos + MarkdownPadding;
@@ -1555,6 +1878,16 @@ procedure TMarkDownViewer.Resize;
 begin
   inherited;
   UpdateScrollBar;
+  Invalidate;
+end;
+
+procedure TMarkDownViewer.SelectAllText;
+begin
+  if FSelectableText = '' then
+    Repaint;
+
+  FSelectionAnchor := 0;
+  FSelectionCaret := Length(FSelectableText);
   Invalidate;
 end;
 

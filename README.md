@@ -36,6 +36,8 @@ Supported rendering includes:
 - Clickable markdown links
 - Vertical scrolling
 - Keyboard scrolling
+- Mouse text selection
+- Copy selected text with `Ctrl+C`
 - Case-insensitive find highlighting
 
 Strikethrough uses double tildes:
@@ -176,6 +178,9 @@ When the viewer has focus, it supports:
 - Page Up and Page Down
 - Home and End
 - Space and Shift+Space
+- Ctrl+A
+- Ctrl+C
+- Escape to clear selection
 
 ## Building
 
