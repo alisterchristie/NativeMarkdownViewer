@@ -1415,7 +1415,7 @@ var
 
   function DrawInline(ATokens: TMarkDownInlineList; ALeft, ATop, AWidth: Integer; ADraw: Boolean;
     BaseStyle: TFontStyles = []; SizeDelta: Integer = 0;
-    AAlignment: TAlignment = taLeftJustify): Integer;
+    AAlignment: TAlignment = taLeftJustify; const AMarkdownLinePrefix: string = ''): Integer;
   var
     TokenIndex: Integer;
     AtomIndex: Integer;
@@ -1430,6 +1430,8 @@ var
     OldBrushColor: TColor;
     OldBrushStyle: TBrushStyle;
     OldBkMode: Integer;
+    PendingMarkdownPrefix: string;
+    AtomMarkdown: string;
     TextStart: Integer;
 
     function MarkdownForAtom(const Token: TMarkDownInlineToken; const AtomText: string): string;
@@ -1540,6 +1542,7 @@ var
     else
       X := ALeft;
     LineUsed := 0;
+    PendingMarkdownPrefix := AMarkdownLinePrefix;
 
     for TokenIndex := 0 to ATokens.Count - 1 do
     begin
@@ -1563,7 +1566,13 @@ var
         if ADraw then
         begin
           AtomRect := Rect(X, YPos, X + AtomWidth, YPos + LineHeight);
-          TextStart := AddSelectableRun(AtomRect, Atom, MarkdownForAtom(ATokens[TokenIndex], Atom));
+          AtomMarkdown := MarkdownForAtom(ATokens[TokenIndex], Atom);
+          if (PendingMarkdownPrefix <> '') and (Trim(Atom) <> '') then
+          begin
+            AtomMarkdown := PendingMarkdownPrefix + AtomMarkdown;
+            PendingMarkdownPrefix := '';
+          end;
+          TextStart := AddSelectableRun(AtomRect, Atom, AtomMarkdown);
           if (YPos + LineHeight >= 0) and (YPos <= ClientHeight) then
           begin
             if ATokens[TokenIndex].Kind = ikCode then
@@ -1857,7 +1866,8 @@ begin
           AssignBaseFont([fsBold], Max(1, 8 - (Block.Level * 2)));
           Tokens := ParseInline(Block.Text, FLinkReferences);
           try
-            TokenHeight := DrawInline(Tokens, TextLeft, Y, ContentWidth, True, [fsBold], Max(1, 8 - (Block.Level * 2)));
+            TokenHeight := DrawInline(Tokens, TextLeft, Y, ContentWidth, True, [fsBold],
+              Max(1, 8 - (Block.Level * 2)), taLeftJustify, StringOfChar('#', Block.Level) + ' ');
           finally
             Tokens.Free;
           end;
@@ -1867,7 +1877,8 @@ begin
         begin
           Tokens := ParseInline(Block.Text, FLinkReferences);
           try
-            TokenHeight := DrawInline(Tokens, TextLeft + 13, Y, ContentWidth - 13, True);
+            TokenHeight := DrawInline(Tokens, TextLeft + 13, Y, ContentWidth - 13, True,
+              [], 0, taLeftJustify, '> ');
           finally
             Tokens.Free;
           end;
@@ -1909,12 +1920,12 @@ begin
             ListMarker := IntToStr(Block.Number) + '. '
           else
             ListMarker := '- ';
-          AddSelectableText(StringOfChar(' ', Max(0, Block.IndentLevel) * 2) + ListMarker);
 
           Tokens := ParseInline(Block.Text, FLinkReferences);
           try
             TokenHeight := DrawInline(Tokens, ListLeft + TextIndent, Y,
-              Max(10, ContentWidth - (ListLeft - TextLeft) - TextIndent), True);
+              Max(10, ContentWidth - (ListLeft - TextLeft) - TextIndent), True,
+              [], 0, taLeftJustify, StringOfChar(' ', Max(0, Block.IndentLevel) * 2) + ListMarker);
           finally
             Tokens.Free;
           end;
