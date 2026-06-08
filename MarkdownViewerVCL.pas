@@ -62,6 +62,7 @@ type
     procedure SetScrollPosition(const Value: Integer);
     procedure UpdateScrollBar;
     procedure WMErasBkgnd(var Message: TMessage); message WM_ERASEBKGND;
+    procedure WMGetDlgCode(var Message: TMessage); message WM_GETDLGCODE;
     procedure WMVScroll(var Message: TWMVScroll); message WM_VSCROLL;
     procedure WMMouseWheel(var Message: TWMMouseWheel); message WM_MOUSEWHEEL;
     procedure CMFontChanged(var Message: TMessage); message CM_FONTCHANGED;
@@ -1523,6 +1524,12 @@ end;
 procedure TMarkDownViewer.WMErasBkgnd(var Message: TMessage);
 begin
   Message.Result := 1;
+end;
+
+procedure TMarkDownViewer.WMGetDlgCode(var Message: TMessage);
+begin
+  inherited;
+  Message.Result := Message.Result or DLGC_WANTARROWS or DLGC_WANTALLKEYS;
 end;
 
 procedure TMarkDownViewer.WMMouseWheel(var Message: TWMMouseWheel);
