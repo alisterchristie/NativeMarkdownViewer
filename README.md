@@ -22,6 +22,7 @@ Supported rendering includes:
 - Strikethrough spans
 - Escaped markdown punctuation
 - Automatic links
+- Reference-style links
 - Inline code
 - Fenced code blocks
 - Block quotes
@@ -35,6 +36,7 @@ Supported rendering includes:
 - Clickable markdown links
 - Vertical scrolling
 - Keyboard scrolling
+- Case-insensitive find highlighting
 
 Strikethrough uses double tildes:
 
@@ -53,6 +55,14 @@ URLs using `http://`, `https://`, or `www.` are linked automatically. Angle-brac
 ```markdown
 https://www.embarcadero.com/
 <https://docwiki.embarcadero.com/>
+```
+
+Reference-style links are resolved from definitions in the markdown:
+
+```markdown
+Read the [DocWiki][docwiki].
+
+[docwiki]: https://docwiki.embarcadero.com/
 ```
 
 The table syntax supports the common markdown alignment row:
@@ -115,6 +125,13 @@ You can also assign lines:
 
 ```pascal
 Viewer.Markdown.Assign(Memo1.Lines);
+```
+
+To highlight matching text, assign `SearchText`:
+
+```pascal
+Viewer.SearchText := 'markdown';
+Viewer.SearchHighlightColor := $00BFFFFF;
 ```
 
 Or load from a file:

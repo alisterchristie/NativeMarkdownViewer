@@ -47,7 +47,10 @@ type
     FLinkColor: TColor;
     FCodeBackgroundColor: TColor;
     FQuoteBarColor: TColor;
+    FSearchHighlightColor: TColor;
     FBasePath: string;
+    FLinkReferences: TStringList;
+    FSearchText: string;
     FOnLinkClick: TMarkDownLinkClickEvent;
     function GetMarkdown: TStrings;
     function GetMarkdownText: string;
@@ -59,6 +62,8 @@ type
     procedure SetMarkdown(const Value: TStrings);
     procedure SetMarkdownText(const Value: string);
     procedure SetQuoteBarColor(const Value: TColor);
+    procedure SetSearchHighlightColor(const Value: TColor);
+    procedure SetSearchText(const Value: string);
     procedure SetScrollPosition(const Value: Integer);
     procedure UpdateScrollBar;
     procedure WMErasBkgnd(var Message: TMessage); message WM_ERASEBKGND;
@@ -93,6 +98,8 @@ type
     property ParentFont;
     property PopupMenu;
     property QuoteBarColor: TColor read FQuoteBarColor write SetQuoteBarColor default clSilver;
+    property SearchHighlightColor: TColor read FSearchHighlightColor write SetSearchHighlightColor default $00BFFFFF;
+    property SearchText: string read FSearchText write SetSearchText;
     property ShowHint;
     property TabOrder;
     property TabStop default True;
@@ -174,6 +181,32 @@ begin
         Result := False;
         Break;
       end;
+end;
+
+function TryParseLinkReference(const Line: string; out ReferenceName, Url: string): Boolean;
+var
+  CloseBracket: Integer;
+  Rest: string;
+  SpacePos: Integer;
+  T: string;
+begin
+  T := Trim(Line);
+  Result := (Length(T) > 4) and (T[1] = '[');
+  if not Result then
+    Exit;
+
+  CloseBracket := Pos(']:', T);
+  Result := CloseBracket > 2;
+  if not Result then
+    Exit;
+
+  ReferenceName := LowerCase(Trim(Copy(T, 2, CloseBracket - 2)));
+  Rest := Trim(Copy(T, CloseBracket + 2, MaxInt));
+  SpacePos := Pos(' ', Rest);
+  if SpacePos > 0 then
+    Rest := Copy(Rest, 1, SpacePos - 1);
+  Url := Trim(Rest);
+  Result := (ReferenceName <> '') and (Url <> '');
 end;
 
 procedure SplitTableRow(const Line: string; Cells: TStrings);
@@ -392,6 +425,8 @@ var
   ImageAlt: string;
   ImageUrl: string;
   ParagraphText: string;
+  ReferenceName: string;
+  ReferenceUrl: string;
   Level: Integer;
   IndentLevel: Integer;
   Number: Integer;
@@ -432,6 +467,13 @@ begin
     end;
 
     if Trim(Lines[I]) = '' then
+    begin
+      CommitParagraph;
+      Inc(I);
+      Continue;
+    end;
+
+    if TryParseLinkReference(Lines[I], ReferenceName, ReferenceUrl) then
     begin
       CommitParagraph;
       Inc(I);
@@ -609,7 +651,24 @@ begin
   Result := True;
 end;
 
-function ParseInline(const Text: string): TMarkDownInlineList;
+procedure ExtractLinkReferences(Lines: TStrings; References: TStrings);
+var
+  I: Integer;
+  ReferenceName: string;
+  ReferenceUrl: string;
+begin
+  References.BeginUpdate;
+  try
+    References.Clear;
+    for I := 0 to Lines.Count - 1 do
+      if TryParseLinkReference(Lines[I], ReferenceName, ReferenceUrl) then
+        References.Values[ReferenceName] := ReferenceUrl;
+  finally
+    References.EndUpdate;
+  end;
+end;
+
+function ParseInline(const Text: string; References: TStrings = nil): TMarkDownInlineList;
 var
   I: Integer;
   J: Integer;
@@ -617,6 +676,7 @@ var
   NextIndex: Integer;
   Buffer: string;
   LinkText: string;
+  ReferenceName: string;
   LinkUrl: string;
 
   procedure FlushBuffer;
@@ -721,6 +781,26 @@ begin
           Continue;
         end;
       end;
+
+      if (References <> nil) and (J > I) and (J < Length(Text)) and (Text[J + 1] = '[') then
+      begin
+        K := FindUnescaped(']', Text, J + 2);
+        if K > J then
+        begin
+          LinkText := Copy(Text, I + 1, J - I - 1);
+          ReferenceName := Trim(Copy(Text, J + 2, K - J - 2));
+          if ReferenceName = '' then
+            ReferenceName := LinkText;
+          LinkUrl := References.Values[LowerCase(ReferenceName)];
+          if LinkUrl <> '' then
+          begin
+            FlushBuffer;
+            AddToken(Result, ikLink, LinkText, LinkUrl);
+            I := K + 1;
+            Continue;
+          end;
+        end;
+      end;
     end;
 
     Buffer := Buffer + Text[I];
@@ -747,8 +827,11 @@ begin
   FLinkColor := clHighlight;
   FCodeBackgroundColor := $00F2F2F2;
   FQuoteBarColor := clSilver;
+  FSearchHighlightColor := $00BFFFFF;
   FMarkdown := TStringList.Create;
   FMarkdown.OnChange := MarkdownChanged;
+  FLinkReferences := TStringList.Create;
+  FLinkReferences.CaseSensitive := False;
   FBlocks := TMarkDownBlockList.Create(True);
   FLinkHits := TMarkDownLinkHitList.Create;
 end;
@@ -757,6 +840,7 @@ destructor TMarkDownViewer.Destroy;
 begin
   FLinkHits.Free;
   FBlocks.Free;
+  FLinkReferences.Free;
   FMarkdown.Free;
   inherited Destroy;
 end;
@@ -830,6 +914,7 @@ procedure TMarkDownViewer.MarkdownChanged(Sender: TObject);
 var
   Blocks: TMarkDownBlockList;
 begin
+  ExtractLinkReferences(FMarkdown, FLinkReferences);
   Blocks := ParseBlocks(FMarkdown);
   FBlocks.Free;
   FBlocks := Blocks;
@@ -972,6 +1057,41 @@ var
     OldBrushStyle: TBrushStyle;
     OldBkMode: Integer;
 
+    procedure DrawSearchHighlights(const AText: string; TextX, TextY, TextHeight: Integer);
+    var
+      SearchIn: string;
+      SearchFor: string;
+      FoundAt: Integer;
+      HighlightRect: TRect;
+      OldColor: TColor;
+      OldStyle: TBrushStyle;
+    begin
+      if (FSearchText = '') or (AText = '') then
+        Exit;
+
+      SearchIn := LowerCase(AText);
+      SearchFor := LowerCase(FSearchText);
+      FoundAt := Pos(SearchFor, SearchIn);
+      while FoundAt > 0 do
+      begin
+        HighlightRect := Rect(
+          TextX + Canvas.TextWidth(Copy(AText, 1, FoundAt - 1)),
+          TextY,
+          TextX + Canvas.TextWidth(Copy(AText, 1, FoundAt + Length(FSearchText) - 1)),
+          TextY + TextHeight);
+
+        OldColor := Canvas.Brush.Color;
+        OldStyle := Canvas.Brush.Style;
+        Canvas.Brush.Color := FSearchHighlightColor;
+        Canvas.Brush.Style := bsSolid;
+        Canvas.FillRect(HighlightRect);
+        Canvas.Brush.Color := OldColor;
+        Canvas.Brush.Style := OldStyle;
+
+        FoundAt := PosEx(SearchFor, SearchIn, FoundAt + Length(SearchFor));
+      end;
+    end;
+
     function MeasureLineWidth(StartToken, StartAtom: Integer): Integer;
     var
       MeasureToken: Integer;
@@ -1053,6 +1173,7 @@ var
             Canvas.Brush.Color := OldBrushColor;
             Canvas.Brush.Style := OldBrushStyle;
           end;
+          DrawSearchHighlights(Atom, X, YPos + 2, LineHeight - 2);
           OldBkMode := SetBkMode(Canvas.Handle, TRANSPARENT);
           Canvas.TextOut(X, YPos + 2, Atom);
           SetBkMode(Canvas.Handle, OldBkMode);
@@ -1181,7 +1302,7 @@ var
         CellStyle := [fsBold]
       else
         CellStyle := [];
-      CellTokens := ParseInline(AText);
+      CellTokens := ParseInline(AText, FLinkReferences);
       try
         Result := DrawInline(CellTokens, 0, 0, Max(1, ACellWidth - 16), False, CellStyle) + 14;
       finally
@@ -1281,7 +1402,7 @@ var
           else
             CellText := '';
 
-          CellTokens := ParseInline(CellText);
+          CellTokens := ParseInline(CellText, FLinkReferences);
           try
             if SourceIndex = 0 then
               DrawInline(CellTokens, CellRect.Left + 8, CellRect.Top + 5,
@@ -1323,7 +1444,7 @@ begin
       bkHeading:
         begin
           AssignBaseFont([fsBold], Max(1, 8 - (Block.Level * 2)));
-          Tokens := ParseInline(Block.Text);
+          Tokens := ParseInline(Block.Text, FLinkReferences);
           try
             TokenHeight := DrawInline(Tokens, TextLeft, Y, ContentWidth, True, [fsBold], Max(1, 8 - (Block.Level * 2)));
           finally
@@ -1333,7 +1454,7 @@ begin
         end;
       bkQuote:
         begin
-          Tokens := ParseInline(Block.Text);
+          Tokens := ParseInline(Block.Text, FLinkReferences);
           try
             TokenHeight := DrawInline(Tokens, TextLeft + 13, Y, ContentWidth - 13, True);
           finally
@@ -1365,7 +1486,7 @@ begin
               Bullet := #$2022;
             Canvas.TextOut(ListLeft, Y + 2, Bullet);
           end;
-          Tokens := ParseInline(Block.Text);
+          Tokens := ParseInline(Block.Text, FLinkReferences);
           try
             TokenHeight := DrawInline(Tokens, ListLeft + TextIndent, Y,
               Max(10, ContentWidth - (ListLeft - TextLeft) - TextIndent), True);
@@ -1412,7 +1533,7 @@ begin
           Inc(Y, 18);
         end;
     else
-      Tokens := ParseInline(Block.Text);
+      Tokens := ParseInline(Block.Text, FLinkReferences);
       try
         TokenHeight := DrawInline(Tokens, TextLeft, Y, ContentWidth, True);
       finally
@@ -1479,6 +1600,24 @@ begin
   if FQuoteBarColor <> Value then
   begin
     FQuoteBarColor := Value;
+    Invalidate;
+  end;
+end;
+
+procedure TMarkDownViewer.SetSearchHighlightColor(const Value: TColor);
+begin
+  if FSearchHighlightColor <> Value then
+  begin
+    FSearchHighlightColor := Value;
+    Invalidate;
+  end;
+end;
+
+procedure TMarkDownViewer.SetSearchText(const Value: string);
+begin
+  if FSearchText <> Value then
+  begin
+    FSearchText := Value;
     Invalidate;
   end;
 end;

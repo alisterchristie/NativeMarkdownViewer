@@ -14,9 +14,13 @@ type
   TMainForm = class(TForm)
   private
     FEditor: TMemo;
+    FFindEdit: TEdit;
+    FFindLabel: TLabel;
+    FFindPanel: TPanel;
     FSplitter: TSplitter;
     FViewer: TMarkDownViewer;
     procedure EditorChanged(Sender: TObject);
+    procedure FindChanged(Sender: TObject);
     procedure LinkClicked(Sender: TObject; const Url: string);
   protected
     procedure CreateParams(var Params: TCreateParams); override;
@@ -53,8 +57,13 @@ This is a native **VCL** markdown viewer component. It paints markdown text dire
 - Task lists
 - Local images with fallback alt text
 - [Clickable links](https://www.embarcadero.com/)
+- Reference-style links
 
 Automatic link examples: https://www.embarcadero.com/ and <https://docwiki.embarcadero.com/>.
+
+[Reference-style links][docwiki] are resolved from definitions elsewhere in the markdown. The same reference can be reused, including this [DocWiki shortcut][docwiki].
+
+The demo find box highlights every visible match for markdown.
 
 Escaped characters remain literal: \*not italic\*, \[not a link\], and \`not code\`.
 
@@ -67,7 +76,7 @@ Escaped characters remain literal: \*not italic\*, \[not a link\], and \`not cod
 | Header Column 1 | Header Column 2 | Align Center | Align Right |
 | :--- | :--- | :---: | ---: |
 | **Bold row data** | Sample value A | `inline code` | $100.00 |
-| Left row data 2 | *Italic value* | [Link](https://www.embarcadero.com/) | $1,500.00 |
+| Left row data 2 | *Italic value* | [DocWiki][docwiki] | $1,500.00 |
 | Left row data 3 | ~~Old value~~ | Center text | $45.50 |
 
 ---
@@ -105,6 +114,8 @@ begin
   Viewer.Align := alClient;
 end;
 ```
+
+[docwiki]: https://docwiki.embarcadero.com/
 ''';
 
 procedure TMainForm.CreateParams(var Params: TCreateParams);
@@ -120,6 +131,25 @@ begin
   Width := 980;
   Height := 680;
   Position := poScreenCenter;
+
+  FFindPanel := TPanel.Create(Self);
+  FFindPanel.Parent := Self;
+  FFindPanel.Align := alTop;
+  FFindPanel.Height := 34;
+  FFindPanel.BevelOuter := bvNone;
+
+  FFindLabel := TLabel.Create(Self);
+  FFindLabel.Parent := FFindPanel;
+  FFindLabel.Left := 10;
+  FFindLabel.Top := 9;
+  FFindLabel.Caption := 'Find';
+
+  FFindEdit := TEdit.Create(Self);
+  FFindEdit.Parent := FFindPanel;
+  FFindEdit.Left := 48;
+  FFindEdit.Top := 5;
+  FFindEdit.Width := 260;
+  FFindEdit.Anchors := [akLeft, akTop, akRight];
 
   FEditor := TMemo.Create(Self);
   FEditor.Parent := Self;
@@ -140,12 +170,22 @@ begin
   FViewer.OnLinkClick := LinkClicked;
   FViewer.MarkdownText := SampleMarkdown;
   FEditor.OnChange := EditorChanged;
+
+  FFindEdit.OnChange := FindChanged;
+  FFindEdit.Text := 'markdown';
+  FindChanged(FFindEdit);
 end;
 
 procedure TMainForm.EditorChanged(Sender: TObject);
 begin
   if FViewer <> nil then
     FViewer.Markdown.Assign(FEditor.Lines);
+end;
+
+procedure TMainForm.FindChanged(Sender: TObject);
+begin
+  if FViewer <> nil then
+    FViewer.SearchText := FFindEdit.Text;
 end;
 
 procedure TMainForm.LinkClicked(Sender: TObject; const Url: string);
