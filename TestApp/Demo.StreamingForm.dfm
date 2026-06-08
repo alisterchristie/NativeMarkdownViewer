@@ -20,10 +20,6 @@ object frmStreaming: TfrmStreaming
     Align = alClient
     ParentColor = False
     TabOrder = 0
-    ExplicitLeft = 216
-    ExplicitTop = 88
-    ExplicitWidth = 360
-    ExplicitHeight = 260
   end
   object pnlTop: TPanel
     Left = 0
@@ -34,9 +30,6 @@ object frmStreaming: TfrmStreaming
     BevelOuter = bvNone
     ShowCaption = False
     TabOrder = 1
-    ExplicitLeft = 232
-    ExplicitTop = 224
-    ExplicitWidth = 185
     object btnLoad: TButton
       AlignWithMargins = True
       Left = 3
@@ -47,9 +40,6 @@ object frmStreaming: TfrmStreaming
       Caption = 'Load'
       TabOrder = 0
       OnClick = btnLoadClick
-      ExplicitLeft = 280
-      ExplicitTop = 16
-      ExplicitHeight = 25
     end
     object TrackBar1: TTrackBar
       AlignWithMargins = True
@@ -73,6 +63,9 @@ object frmStreaming: TfrmStreaming
     Top = 224
   end
   object Timer1: TTimer
+    Enabled = False
+    Interval = 50
+    OnTimer = Timer1Timer
     Left = 152
     Top = 136
   end

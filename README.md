@@ -40,6 +40,7 @@ Supported rendering includes:
 - Copy selected markdown with `Ctrl+C`
 - Copy selected plain text with `Ctrl+Shift+C`
 - Case-insensitive find highlighting
+- Incremental streaming with tail-only block parsing
 
 Strikethrough uses double tildes:
 
@@ -141,6 +142,13 @@ Or load from a file:
 
 ```pascal
 Viewer.LoadFromFile('README.md');
+```
+
+For streamed content, append only the newly received text. The viewer reparses the
+final unstable block instead of rebuilding the complete document:
+
+```pascal
+Viewer.AppendMarkdownText(NewChunk);
 ```
 
 When loading from a file, `BasePath` is set automatically to the markdown file folder so relative image paths resolve naturally. You can also set it yourself:

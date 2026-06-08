@@ -27,6 +27,7 @@ type
     Number: Integer;
     IsTask: Boolean;
     TaskChecked: Boolean;
+    SourceStartLine: Integer;
   end;
 
   TMarkDownLinkHit = record
@@ -67,6 +68,7 @@ type
     FSelectableText: string;
     FScrollPos: Integer;
     FContentHeight: Integer;
+    FLastBlockTop: Integer;
     FSelectionAnchor: Integer;
     FSelectionCaret: Integer;
     FSelecting: Boolean;
@@ -77,6 +79,8 @@ type
     FBasePath: string;
     FLinkReferences: TStringList;
     FSearchText: string;
+    FAppendEndedWithCR: Boolean;
+    FUpdatingMarkdown: Boolean;
     FOnLinkClick: TMarkDownLinkClickEvent;
     function GetMarkdown: TStrings;
     function GetMarkdownText: string;
@@ -113,6 +117,7 @@ type
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
+    procedure AppendMarkdownText(const Value: string);
     procedure LoadFromFile(const FileName: string);
     property MarkdownText: string read GetMarkdownText write SetMarkdownText;
   published
@@ -433,7 +438,7 @@ begin
   end;
 end;
 
-function NewBlock(AKind: TMarkDownBlockKind; const Text: string): TMarkDownBlock;
+function NewBlock(AKind: TMarkDownBlockKind; const Text: string; SourceStartLine: Integer): TMarkDownBlock;
 begin
   Result := TMarkDownBlock.Create;
   Result.Kind := AKind;
@@ -445,9 +450,10 @@ begin
   Result.Number := 0;
   Result.IsTask := False;
   Result.TaskChecked := False;
+  Result.SourceStartLine := SourceStartLine;
 end;
 
-function ParseBlocks(Lines: TStrings): TMarkDownBlockList;
+function ParseBlocks(Lines: TStrings; StartLine: Integer = 0): TMarkDownBlockList;
 var
   I: Integer;
   HeadingText: string;
@@ -458,6 +464,7 @@ var
   ImageAlt: string;
   ImageUrl: string;
   ParagraphText: string;
+  ParagraphStartLine: Integer;
   ReferenceName: string;
   ReferenceUrl: string;
   Level: Integer;
@@ -466,24 +473,28 @@ var
   Ordered: Boolean;
   IsTask: Boolean;
   TaskChecked: Boolean;
+  BlockStartLine: Integer;
   Block: TMarkDownBlock;
 
   procedure CommitParagraph;
   begin
     if Trim(ParagraphText) <> '' then
-      Result.Add(NewBlock(bkParagraph, Trim(ParagraphText)));
+      Result.Add(NewBlock(bkParagraph, Trim(ParagraphText), ParagraphStartLine));
     ParagraphText := '';
+    ParagraphStartLine := -1;
   end;
 
 begin
   Result := TMarkDownBlockList.Create(True);
   ParagraphText := '';
-  I := 0;
+  ParagraphStartLine := -1;
+  I := Max(0, StartLine);
   while I < Lines.Count do
   begin
     if StartsWithFence(Lines[I]) then
     begin
       CommitParagraph;
+      BlockStartLine := I;
       Inc(I);
       CodeText := '';
       while (I < Lines.Count) and not StartsWithFence(Lines[I]) do
@@ -493,7 +504,7 @@ begin
         CodeText := CodeText + Lines[I];
         Inc(I);
       end;
-      Result.Add(NewBlock(bkCodeBlock, CodeText));
+      Result.Add(NewBlock(bkCodeBlock, CodeText, BlockStartLine));
       if I < Lines.Count then
         Inc(I);
       Continue;
@@ -516,7 +527,7 @@ begin
     if TryParseImage(Lines[I], ImageAlt, ImageUrl) then
     begin
       CommitParagraph;
-      Block := NewBlock(bkImage, ImageAlt);
+      Block := NewBlock(bkImage, ImageAlt, I);
       Block.Url := ImageUrl;
       Result.Add(Block);
       Inc(I);
@@ -526,6 +537,7 @@ begin
     if IsTableStart(Lines, I) then
     begin
       CommitParagraph;
+      BlockStartLine := I;
       TableText := Lines[I] + sLineBreak + Lines[I + 1];
       Inc(I, 2);
       while (I < Lines.Count) and (Trim(Lines[I]) <> '') and IsPipeTableRow(Lines[I]) do
@@ -533,14 +545,14 @@ begin
         TableText := TableText + sLineBreak + Lines[I];
         Inc(I);
       end;
-      Result.Add(NewBlock(bkTable, TableText));
+      Result.Add(NewBlock(bkTable, TableText, BlockStartLine));
       Continue;
     end;
 
     if TryParseHeading(Lines[I], HeadingText, Level) then
     begin
       CommitParagraph;
-      Block := NewBlock(bkHeading, HeadingText);
+      Block := NewBlock(bkHeading, HeadingText, I);
       Block.Level := Level;
       Result.Add(Block);
       Inc(I);
@@ -550,7 +562,7 @@ begin
     if IsRuleLine(Lines[I]) then
     begin
       CommitParagraph;
-      Result.Add(NewBlock(bkRule, ''));
+      Result.Add(NewBlock(bkRule, '', I));
       Inc(I);
       Continue;
     end;
@@ -558,6 +570,7 @@ begin
     if Copy(TrimLeftOnly(Lines[I]), 1, 1) = '>' then
     begin
       CommitParagraph;
+      BlockStartLine := I;
       QuoteText := Trim(Copy(TrimLeftOnly(Lines[I]), 2, MaxInt));
       Inc(I);
       while (I < Lines.Count) and (Copy(TrimLeftOnly(Lines[I]), 1, 1) = '>') do
@@ -565,7 +578,7 @@ begin
         QuoteText := QuoteText + ' ' + Trim(Copy(TrimLeftOnly(Lines[I]), 2, MaxInt));
         Inc(I);
       end;
-      Result.Add(NewBlock(bkQuote, QuoteText));
+      Result.Add(NewBlock(bkQuote, QuoteText, BlockStartLine));
       Continue;
     end;
 
@@ -573,7 +586,7 @@ begin
     begin
       CommitParagraph;
       ExtractTaskMarker(ListText, IsTask, TaskChecked);
-      Block := NewBlock(bkListItem, ListText);
+      Block := NewBlock(bkListItem, ListText, I);
       Block.Ordered := Ordered;
       Block.Number := Number;
       Block.IndentLevel := IndentLevel;
@@ -584,7 +597,9 @@ begin
       Continue;
     end;
 
-    if ParagraphText <> '' then
+    if ParagraphText = '' then
+      ParagraphStartLine := I
+    else
       ParagraphText := ParagraphText + ' ';
     ParagraphText := ParagraphText + Trim(Lines[I]);
     Inc(I);
@@ -1083,6 +1098,92 @@ begin
   Clipboard.AsText := MarkdownSelection;
 end;
 
+procedure TMarkDownViewer.AppendMarkdownText(const Value: string);
+var
+  Block: TMarkDownBlock;
+  I: Integer;
+  NewBlocks: TMarkDownBlockList;
+  ReparseLine: Integer;
+  SegmentStart: Integer;
+  StartIndex: Integer;
+  UpdateRect: TRect;
+begin
+  if Value = '' then
+    Exit;
+
+  StartIndex := 1;
+  if FAppendEndedWithCR and (Value[1] = #10) then
+    StartIndex := 2;
+  FAppendEndedWithCR := Value[Length(Value)] = #13;
+  if StartIndex > Length(Value) then
+    Exit;
+
+  if FBlocks.Count > 0 then
+    ReparseLine := FBlocks.Last.SourceStartLine
+  else
+    ReparseLine := 0;
+
+  FUpdatingMarkdown := True;
+  FMarkdown.BeginUpdate;
+  try
+    if FMarkdown.Count = 0 then
+      FMarkdown.Add('');
+
+    SegmentStart := StartIndex;
+    I := StartIndex;
+    while I <= Length(Value) do
+    begin
+      if CharInSet(Value[I], [#10, #13]) then
+      begin
+        FMarkdown[FMarkdown.Count - 1] := FMarkdown[FMarkdown.Count - 1] +
+          Copy(Value, SegmentStart, I - SegmentStart);
+        if (Value[I] = #13) and (I < Length(Value)) and (Value[I + 1] = #10) then
+          Inc(I);
+        FMarkdown.Add('');
+        SegmentStart := I + 1;
+      end;
+      Inc(I);
+    end;
+
+    if SegmentStart <= Length(Value) then
+      FMarkdown[FMarkdown.Count - 1] := FMarkdown[FMarkdown.Count - 1] +
+        Copy(Value, SegmentStart, MaxInt);
+  finally
+    FMarkdown.EndUpdate;
+    FUpdatingMarkdown := False;
+  end;
+
+  ExtractLinkReferences(FMarkdown, FLinkReferences);
+  while (FBlocks.Count > 0) and (FBlocks.Last.SourceStartLine >= ReparseLine) do
+    FBlocks.Delete(FBlocks.Count - 1);
+
+  NewBlocks := ParseBlocks(FMarkdown, ReparseLine);
+  try
+    while NewBlocks.Count > 0 do
+    begin
+      Block := NewBlocks.Extract(NewBlocks[0]);
+      FBlocks.Add(Block);
+    end;
+  finally
+    NewBlocks.Free;
+  end;
+
+  FSelectionAnchor := 0;
+  FSelectionCaret := 0;
+  FSelectableText := '';
+  FTextRuns.Clear;
+  FCopyChunks.Clear;
+  if HandleAllocated then
+  begin
+    UpdateRect := Rect(0, EnsureRange(FLastBlockTop, 0, Max(0, ClientHeight - 1)),
+      ClientWidth, ClientHeight);
+    Winapi.Windows.InvalidateRect(Handle, @UpdateRect, False);
+  end
+  else
+    Invalidate;
+  UpdateScrollBar;
+end;
+
 procedure TMarkDownViewer.LoadFromFile(const FileName: string);
 begin
   FBasePath := ExtractFilePath(FileName);
@@ -1093,6 +1194,10 @@ procedure TMarkDownViewer.MarkdownChanged(Sender: TObject);
 var
   Blocks: TMarkDownBlockList;
 begin
+  if FUpdatingMarkdown then
+    Exit;
+
+  FAppendEndedWithCR := False;
   ExtractLinkReferences(FMarkdown, FLinkReferences);
   Blocks := ParseBlocks(FMarkdown);
   FBlocks.Free;
@@ -1854,11 +1959,14 @@ begin
 
   Blocks := FBlocks;
   Y := MarkdownPadding - FScrollPos;
+  FLastBlockTop := Y;
   TextLeft := MarkdownPadding;
   ContentWidth := Max(10, ClientWidth - (MarkdownPadding * 2) - GetSystemMetrics(SM_CXVSCROLL));
 
   for I := 0 to Blocks.Count - 1 do
   begin
+    if I = Blocks.Count - 1 then
+      FLastBlockTop := Y;
     Block := Blocks[I];
     case Block.Kind of
       bkHeading:
