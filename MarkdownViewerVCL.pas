@@ -1203,6 +1203,7 @@ var
   R: TRect;
   CheckRect: TRect;
   Bullet: string;
+  ListMarker: string;
   ListLeft: Integer;
   TextIndent: Integer;
   LineTextStart: Integer;
@@ -1896,6 +1897,20 @@ begin
               Bullet := #$2022;
             Canvas.TextOut(ListLeft, Y + 2, Bullet);
           end;
+
+          if Block.IsTask then
+          begin
+            if Block.TaskChecked then
+              ListMarker := '- [x] '
+            else
+              ListMarker := '- [ ] ';
+          end
+          else if Block.Ordered then
+            ListMarker := IntToStr(Block.Number) + '. '
+          else
+            ListMarker := '- ';
+          AddSelectableText(StringOfChar(' ', Max(0, Block.IndentLevel) * 2) + ListMarker);
+
           Tokens := ParseInline(Block.Text, FLinkReferences);
           try
             TokenHeight := DrawInline(Tokens, ListLeft + TextIndent, Y,
