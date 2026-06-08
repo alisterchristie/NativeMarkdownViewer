@@ -51,11 +51,29 @@ object frmStreaming: TfrmStreaming
       ExplicitTop = 16
       ExplicitHeight = 25
     end
+    object TrackBar1: TTrackBar
+      AlignWithMargins = True
+      Left = 84
+      Top = 3
+      Width = 150
+      Height = 35
+      Align = alLeft
+      Max = 100
+      Min = 1
+      Frequency = 10
+      Position = 1
+      ShowSelRange = False
+      TabOrder = 1
+    end
   end
   object OpenTextFileDialog1: TOpenTextFileDialog
     DefaultExt = '.md'
     Filter = 'Markdown|*.md|All Files|*.*'
     Left = 304
     Top = 224
+  end
+  object Timer1: TTimer
+    Left = 152
+    Top = 136
   end
 end

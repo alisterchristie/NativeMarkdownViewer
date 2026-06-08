@@ -3,8 +3,19 @@ unit Demo.StreamingForm;
 interface
 
 uses
-  Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants, System.Classes, Vcl.Graphics,
-  Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.StdCtrls, Vcl.ExtDlgs, Vcl.ExtCtrls, MarkdownViewerVCL;
+  Winapi.Windows,
+  Winapi.Messages,
+  System.SysUtils,
+  System.Variants,
+  System.Classes,
+  Vcl.Graphics,
+  Vcl.Controls,
+  Vcl.Forms,
+  Vcl.Dialogs,
+  Vcl.StdCtrls,
+  Vcl.ExtDlgs,
+  Vcl.ExtCtrls,
+  MarkdownViewerVCL, Vcl.ComCtrls;
 
 type
   TfrmStreaming = class(TForm)
@@ -12,6 +23,8 @@ type
     pnlTop: TPanel;
     OpenTextFileDialog1: TOpenTextFileDialog;
     btnLoad: TButton;
+    Timer1: TTimer;
+    TrackBar1: TTrackBar;
     procedure btnLoadClick(Sender: TObject);
     procedure FormClose(Sender: TObject; var Action: TCloseAction);
   private
@@ -19,9 +32,6 @@ type
   public
     { Public declarations }
   end;
-
-var
-  frmStreaming: TfrmStreaming;
 
 implementation
 
