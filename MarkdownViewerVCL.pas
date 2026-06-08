@@ -59,6 +59,7 @@ type
     procedure SetMarkdown(const Value: TStrings);
     procedure SetMarkdownText(const Value: string);
     procedure SetQuoteBarColor(const Value: TColor);
+    procedure SetScrollPosition(const Value: Integer);
     procedure UpdateScrollBar;
     procedure WMErasBkgnd(var Message: TMessage); message WM_ERASEBKGND;
     procedure WMVScroll(var Message: TWMVScroll); message WM_VSCROLL;
@@ -66,6 +67,7 @@ type
     procedure CMFontChanged(var Message: TMessage); message CM_FONTCHANGED;
   protected
     procedure CreateParams(var Params: TCreateParams); override;
+    procedure KeyDown(var Key: Word; Shift: TShiftState); override;
     procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Integer); override;
     procedure MouseMove(Shift: TShiftState; X, Y: Integer); override;
     procedure Paint; override;
@@ -126,7 +128,7 @@ const
   ParagraphSpacing = 9;
 
 type
-  TMarkDownInlineKind = (ikText, ikBold, ikItalic, ikBoldItalic, ikCode, ikLink);
+  TMarkDownInlineKind = (ikText, ikBold, ikItalic, ikBoldItalic, ikCode, ikLink, ikStrike);
 
   TMarkDownInlineToken = record
     Kind: TMarkDownInlineKind;
@@ -527,12 +529,94 @@ begin
   Tokens.Add(Token);
 end;
 
+function IsEscapedAt(const Text: string; Index: Integer): Boolean;
+var
+  I: Integer;
+  SlashCount: Integer;
+begin
+  SlashCount := 0;
+  I := Index - 1;
+  while (I >= 1) and (Text[I] = '\') do
+  begin
+    Inc(SlashCount);
+    Dec(I);
+  end;
+  Result := Odd(SlashCount);
+end;
+
+function FindUnescaped(const Needle, Text: string; StartPos: Integer): Integer;
+begin
+  Result := PosEx(Needle, Text, StartPos);
+  while (Result > 0) and IsEscapedAt(Text, Result) do
+    Result := PosEx(Needle, Text, Result + Length(Needle));
+end;
+
+function IsAutoLinkBoundary(const Text: string; Index: Integer): Boolean;
+begin
+  Result := (Index = 1) or CharInSet(Text[Index - 1], [' ', #9, '(', '[', '{', '<', '>', '"', '''']);
+end;
+
+function TryReadAutoLink(const Text: string; Index: Integer; out DisplayText, Url: string;
+  out NextIndex: Integer): Boolean;
+var
+  I: Integer;
+  HasScheme: Boolean;
+begin
+  Result := False;
+  DisplayText := '';
+  Url := '';
+  NextIndex := Index;
+
+  if (Text[Index] = '<') and
+    (StartsText('http://', Copy(Text, Index + 1, MaxInt)) or StartsText('https://', Copy(Text, Index + 1, MaxInt))) then
+  begin
+    I := PosEx('>', Text, Index + 1);
+    if I > Index + 1 then
+    begin
+      DisplayText := Copy(Text, Index + 1, I - Index - 1);
+      Url := DisplayText;
+      NextIndex := I + 1;
+      Exit(True);
+    end;
+  end;
+
+  if not IsAutoLinkBoundary(Text, Index) then
+    Exit;
+
+  HasScheme := StartsText('http://', Copy(Text, Index, MaxInt)) or
+    StartsText('https://', Copy(Text, Index, MaxInt));
+  if not HasScheme and not StartsText('www.', Copy(Text, Index, MaxInt)) then
+    Exit;
+
+  I := Index;
+  while (I <= Length(Text)) and not CharInSet(Text[I], [' ', #9, #13, #10, '<', '>', '"']) do
+    Inc(I);
+  DisplayText := Copy(Text, Index, I - Index);
+  while (DisplayText <> '') and CharInSet(DisplayText[Length(DisplayText)], ['.', ',', ';', ':', '!', '?']) do
+  begin
+    Dec(I);
+    Delete(DisplayText, Length(DisplayText), 1);
+  end;
+  if DisplayText = '' then
+    Exit;
+
+  if HasScheme then
+    Url := DisplayText
+  else
+    Url := 'https://' + DisplayText;
+  NextIndex := I;
+  Result := True;
+end;
+
 function ParseInline(const Text: string): TMarkDownInlineList;
 var
   I: Integer;
   J: Integer;
   K: Integer;
+  NextIndex: Integer;
   Buffer: string;
+  LinkText: string;
+  LinkUrl: string;
 
   procedure FlushBuffer;
   begin
@@ -546,9 +630,25 @@ begin
   I := 1;
   while I <= Length(Text) do
   begin
+    if (Text[I] = '\') and (I < Length(Text)) and
+      CharInSet(Text[I + 1], ['\', '`', '*', '_', '{', '}', '[', ']', '(', ')', '#', '+', '-', '.', '!', '>', '~', '|']) then
+    begin
+      Buffer := Buffer + Text[I + 1];
+      Inc(I, 2);
+      Continue;
+    end;
+
+    if TryReadAutoLink(Text, I, LinkText, LinkUrl, NextIndex) then
+    begin
+      FlushBuffer;
+      AddToken(Result, ikLink, LinkText, LinkUrl);
+      I := NextIndex;
+      Continue;
+    end;
+
     if Text[I] = '`' then
     begin
-      J := PosEx('`', Text, I + 1);
+      J := FindUnescaped('`', Text, I + 1);
       if J > I then
       begin
         FlushBuffer;
@@ -558,9 +658,21 @@ begin
       end;
     end;
 
+    if Copy(Text, I, 2) = '~~' then
+    begin
+      J := FindUnescaped('~~', Text, I + 2);
+      if J > I then
+      begin
+        FlushBuffer;
+        AddToken(Result, ikStrike, Copy(Text, I + 2, J - I - 2));
+        I := J + 2;
+        Continue;
+      end;
+    end;
+
     if Copy(Text, I, 2) = '**' then
     begin
-      J := PosEx('**', Text, I + 2);
+      J := FindUnescaped('**', Text, I + 2);
       if J > I then
       begin
         FlushBuffer;
@@ -572,7 +684,7 @@ begin
 
     if Copy(Text, I, 2) = '__' then
     begin
-      J := PosEx('__', Text, I + 2);
+      J := FindUnescaped('__', Text, I + 2);
       if J > I then
       begin
         FlushBuffer;
@@ -584,7 +696,7 @@ begin
 
     if CharInSet(Text[I], ['*', '_']) then
     begin
-      J := PosEx(Text[I], Text, I + 1);
+      J := FindUnescaped(Text[I], Text, I + 1);
       if J > I then
       begin
         FlushBuffer;
@@ -596,10 +708,10 @@ begin
 
     if Text[I] = '[' then
     begin
-      J := PosEx(']', Text, I + 1);
+      J := FindUnescaped(']', Text, I + 1);
       if (J > I) and (J < Length(Text)) and (Text[J + 1] = '(') then
       begin
-        K := PosEx(')', Text, J + 2);
+        K := FindUnescaped(')', Text, J + 2);
         if K > J then
         begin
           FlushBuffer;
@@ -660,6 +772,38 @@ begin
   Invalidate;
 end;
 
+procedure TMarkDownViewer.KeyDown(var Key: Word; Shift: TShiftState);
+var
+  Handled: Boolean;
+begin
+  inherited KeyDown(Key, Shift);
+  Handled := True;
+  case Key of
+    VK_UP:
+      SetScrollPosition(FScrollPos - 24);
+    VK_DOWN:
+      SetScrollPosition(FScrollPos + 24);
+    VK_PRIOR:
+      SetScrollPosition(FScrollPos - ClientHeight);
+    VK_NEXT:
+      SetScrollPosition(FScrollPos + ClientHeight);
+    VK_HOME:
+      SetScrollPosition(0);
+    VK_END:
+      SetScrollPosition(FContentHeight);
+    VK_SPACE:
+      if ssShift in Shift then
+        SetScrollPosition(FScrollPos - ClientHeight)
+      else
+        SetScrollPosition(FScrollPos + ClientHeight);
+  else
+    Handled := False;
+  end;
+
+  if Handled then
+    Key := 0;
+end;
+
 function TMarkDownViewer.GetMarkdownText: string;
 begin
   Result := FMarkdown.Text;
@@ -699,6 +843,8 @@ var
   Hit: TMarkDownLinkHit;
 begin
   inherited;
+  if CanFocus then
+    SetFocus;
   if Button <> mbLeft then
     Exit;
 
@@ -789,6 +935,8 @@ var
           Canvas.Font.Color := FLinkColor;
           Canvas.Font.Style := BaseStyle + [fsUnderline];
         end;
+      ikStrike:
+        Canvas.Font.Style := BaseStyle + [fsStrikeOut];
     end;
   end;
 
@@ -806,13 +954,15 @@ var
   end;
 
   function DrawInline(ATokens: TMarkDownInlineList; ALeft, ATop, AWidth: Integer; ADraw: Boolean;
-    BaseStyle: TFontStyles = []; SizeDelta: Integer = 0): Integer;
+    BaseStyle: TFontStyles = []; SizeDelta: Integer = 0;
+    AAlignment: TAlignment = taLeftJustify): Integer;
   var
     TokenIndex: Integer;
     AtomIndex: Integer;
+    AtomStart: Integer;
+    LineUsed: Integer;
     X: Integer;
     YPos: Integer;
-    RightEdge: Integer;
     Atom: string;
     AtomWidth: Integer;
     AtomRect: TRect;
@@ -820,12 +970,57 @@ var
     OldBrushColor: TColor;
     OldBrushStyle: TBrushStyle;
     OldBkMode: Integer;
+
+    function MeasureLineWidth(StartToken, StartAtom: Integer): Integer;
+    var
+      MeasureToken: Integer;
+      MeasureAtom: Integer;
+      MeasureText: string;
+      MeasureWidth: Integer;
+    begin
+      Result := 0;
+      for MeasureToken := StartToken to ATokens.Count - 1 do
+      begin
+        AssignInlineFont(ATokens[MeasureToken].Kind, BaseStyle, SizeDelta);
+        if MeasureToken = StartToken then
+          MeasureAtom := StartAtom
+        else
+          MeasureAtom := 1;
+        while MeasureAtom <= Length(ATokens[MeasureToken].Text) do
+        begin
+          MeasureText := NextAtom(ATokens[MeasureToken].Text, MeasureAtom);
+          MeasureWidth := Canvas.TextWidth(MeasureText);
+          if (Trim(MeasureText) <> '') and (Result > 0) and (Result + MeasureWidth > AWidth) then
+            Exit;
+          Inc(Result, MeasureWidth);
+        end;
+      end;
+    end;
+
+    function AlignedX(StartToken, StartAtom: Integer): Integer;
+    var
+      Available: Integer;
+    begin
+      Available := Max(0, AWidth - MeasureLineWidth(StartToken, StartAtom));
+      case AAlignment of
+        taCenter:
+          Result := ALeft + (Available div 2);
+        taRightJustify:
+          Result := ALeft + Available;
+      else
+        Result := ALeft;
+      end;
+    end;
+
   begin
-    X := ALeft;
     YPos := ATop;
-    RightEdge := ALeft + AWidth;
     AssignBaseFont(BaseStyle, SizeDelta);
     LineHeight := Canvas.TextHeight('Wg') + 5;
+    if ATokens.Count > 0 then
+      X := AlignedX(0, 1)
+    else
+      X := ALeft;
+    LineUsed := 0;
 
     for TokenIndex := 0 to ATokens.Count - 1 do
     begin
@@ -833,12 +1028,15 @@ var
       AtomIndex := 1;
       while AtomIndex <= Length(ATokens[TokenIndex].Text) do
       begin
+        AtomStart := AtomIndex;
         Atom := NextAtom(ATokens[TokenIndex].Text, AtomIndex);
         AtomWidth := Canvas.TextWidth(Atom);
-        if (Trim(Atom) <> '') and (X > ALeft) and (X + AtomWidth > RightEdge) then
+        if (Trim(Atom) <> '') and (LineUsed > 0) and (LineUsed + AtomWidth > AWidth) then
         begin
-          X := ALeft;
           Inc(YPos, LineHeight);
+          LineUsed := 0;
+          X := AlignedX(TokenIndex, AtomStart);
+          AssignInlineFont(ATokens[TokenIndex].Kind, BaseStyle, SizeDelta);
         end;
 
         if (ADraw) and (YPos + LineHeight >= 0) and (YPos <= ClientHeight) then
@@ -865,6 +1063,7 @@ var
           end;
         end;
         Inc(X, AtomWidth);
+        Inc(LineUsed, AtomWidth);
       end;
     end;
 
@@ -971,22 +1170,22 @@ var
     TotalWidth: Integer;
     CellText: string;
     CellRect: TRect;
-    TextRect: TRect;
-    Flags: Integer;
-    OldBkMode: Integer;
+    CellTokens: TMarkDownInlineList;
 
     function MeasureCellHeight(const AText: string; ACellWidth: Integer; AHeader: Boolean): Integer;
     var
-      MeasureRect: TRect;
+      CellStyle: TFontStyles;
     begin
-      Canvas.Font.Assign(Font);
       if AHeader then
-        Canvas.Font.Style := [fsBold]
+        CellStyle := [fsBold]
       else
-        Canvas.Font.Style := [];
-      MeasureRect := Rect(0, 0, Max(1, ACellWidth - 16), 0);
-      DrawText(Canvas.Handle, PChar(AText), Length(AText), MeasureRect, DT_WORDBREAK or DT_CALCRECT or DT_NOPREFIX);
-      Result := Max(Canvas.TextHeight('Wg') + 14, MeasureRect.Height + 14);
+        CellStyle := [];
+      CellTokens := ParseInline(AText);
+      try
+        Result := DrawInline(CellTokens, 0, 0, Max(1, ACellWidth - 16), False, CellStyle) + 14;
+      finally
+        CellTokens.Free;
+      end;
     end;
   begin
     Result := 0;
@@ -1081,25 +1280,17 @@ var
           else
             CellText := '';
 
-          Canvas.Font.Assign(Font);
-          if SourceIndex = 0 then
-            Canvas.Font.Style := [fsBold]
-          else
-            Canvas.Font.Style := [];
-
-          TextRect := Rect(CellRect.Left + 8, CellRect.Top + 7, CellRect.Right - 8, CellRect.Bottom - 7);
-          Flags := DT_WORDBREAK or DT_NOPREFIX;
-          case Aligns[Col] of
-            taCenter:
-              Flags := Flags or DT_CENTER;
-            taRightJustify:
-              Flags := Flags or DT_RIGHT;
-          else
-            Flags := Flags or DT_LEFT;
+          CellTokens := ParseInline(CellText);
+          try
+            if SourceIndex = 0 then
+              DrawInline(CellTokens, CellRect.Left + 8, CellRect.Top + 5,
+                Max(1, CellRect.Width - 16), True, [fsBold], 0, Aligns[Col])
+            else
+              DrawInline(CellTokens, CellRect.Left + 8, CellRect.Top + 5,
+                Max(1, CellRect.Width - 16), True, [], 0, Aligns[Col]);
+          finally
+            CellTokens.Free;
           end;
-          OldBkMode := SetBkMode(Canvas.Handle, TRANSPARENT);
-          DrawText(Canvas.Handle, PChar(CellText), Length(CellText), TextRect, Flags);
-          SetBkMode(Canvas.Handle, OldBkMode);
           Inc(X, ColWidths[Col]);
         end;
         Inc(RowTop, RowHeight);
@@ -1291,6 +1482,19 @@ begin
   end;
 end;
 
+procedure TMarkDownViewer.SetScrollPosition(const Value: Integer);
+var
+  NewPosition: Integer;
+begin
+  NewPosition := EnsureRange(Value, 0, Max(0, FContentHeight - ClientHeight));
+  if FScrollPos <> NewPosition then
+  begin
+    FScrollPos := NewPosition;
+    UpdateScrollBar;
+    Invalidate;
+  end;
+end;
+
 procedure TMarkDownViewer.UpdateScrollBar;
 var
   ScrollInfo: TScrollInfo;
@@ -1326,14 +1530,13 @@ var
   Delta: Integer;
 begin
   Delta := -Message.WheelDelta div WHEEL_DELTA;
-  FScrollPos := FScrollPos + (Delta * 3 * Max(16, Canvas.TextHeight('Wg')));
-  UpdateScrollBar;
-  Invalidate;
+  SetScrollPosition(FScrollPos + (Delta * 3 * Max(16, Canvas.TextHeight('Wg'))));
   Message.Result := 1;
 end;
 
 procedure TMarkDownViewer.WMVScroll(var Message: TWMVScroll);
 var
+  NewPosition: Integer;
   ScrollInfo: TScrollInfo;
 begin
   ZeroMemory(@ScrollInfo, SizeOf(ScrollInfo));
@@ -1341,20 +1544,20 @@ begin
   ScrollInfo.fMask := SIF_ALL;
   GetScrollInfo(Handle, SB_VERT, ScrollInfo);
 
+  NewPosition := FScrollPos;
   case Message.ScrollCode of
     SB_LINEUP:
-      Dec(FScrollPos, 24);
+      Dec(NewPosition, 24);
     SB_LINEDOWN:
-      Inc(FScrollPos, 24);
+      Inc(NewPosition, 24);
     SB_PAGEUP:
-      Dec(FScrollPos, ClientHeight);
+      Dec(NewPosition, ClientHeight);
     SB_PAGEDOWN:
-      Inc(FScrollPos, ClientHeight);
+      Inc(NewPosition, ClientHeight);
     SB_THUMBPOSITION, SB_THUMBTRACK:
-      FScrollPos := ScrollInfo.nTrackPos;
+      NewPosition := ScrollInfo.nTrackPos;
   end;
 
-  UpdateScrollBar;
-  Invalidate;
+  SetScrollPosition(NewPosition);
 end;
 end.

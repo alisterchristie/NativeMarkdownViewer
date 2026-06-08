@@ -42,7 +42,9 @@ This is a native **VCL** markdown viewer component. It paints markdown text dire
 ## Supported examples
 
 - Headings
-- **Bold** and *italic* spans
+- **Bold**, *italic*, and ~~strikethrough~~ spans
+- Escaped markdown characters
+- Automatic links
 - Ordered and unordered lists
 - Nested lists
 - Block quotes
@@ -52,6 +54,10 @@ This is a native **VCL** markdown viewer component. It paints markdown text dire
 - Local images with fallback alt text
 - [Clickable links](https://www.embarcadero.com/)
 
+Automatic link examples: https://www.embarcadero.com/ and <https://docwiki.embarcadero.com/>.
+
+Escaped characters remain literal: \*not italic\*, \[not a link\], and \`not code\`.
+
 > The component is in the package, but this demo creates it in code so it does not need to be installed in the IDE.
 
 ---
@@ -60,9 +66,9 @@ This is a native **VCL** markdown viewer component. It paints markdown text dire
 
 | Header Column 1 | Header Column 2 | Align Center | Align Right |
 | :--- | :--- | :---: | ---: |
-| Left row data 1 | Sample value A | Center text | $100.00 |
-| Left row data 2 | Sample value B | Center text | $1,500.00 |
-| Left row data 3 | Sample value C | Center text | $45.50 |
+| **Bold row data** | Sample value A | `inline code` | $100.00 |
+| Left row data 2 | *Italic value* | [Link](https://www.embarcadero.com/) | $1,500.00 |
+| Left row data 3 | ~~Old value~~ | Center text | $45.50 |
 
 ---
 

@@ -19,6 +19,9 @@ Supported rendering includes:
 - Headings
 - Paragraphs
 - Bold and italic spans
+- Strikethrough spans
+- Escaped markdown punctuation
+- Automatic links
 - Inline code
 - Fenced code blocks
 - Block quotes
@@ -27,9 +30,30 @@ Supported rendering includes:
 - Nested list indentation
 - Task lists with checked and unchecked boxes
 - Pipe tables with left, center, and right alignment
+- Inline formatting and links inside table cells
 - Local images with scaled rendering and alt-text fallback
 - Clickable markdown links
 - Vertical scrolling
+- Keyboard scrolling
+
+Strikethrough uses double tildes:
+
+```markdown
+This is ~~no longer current~~.
+```
+
+Prefix markdown punctuation with a backslash to render it literally:
+
+```markdown
+\*not italic\* and \[not a link\]
+```
+
+URLs using `http://`, `https://`, or `www.` are linked automatically. Angle-bracket autolinks are also supported:
+
+```markdown
+https://www.embarcadero.com/
+<https://docwiki.embarcadero.com/>
+```
 
 The table syntax supports the common markdown alignment row:
 
@@ -37,6 +61,15 @@ The table syntax supports the common markdown alignment row:
 | Header Column 1 | Header Column 2 | Align Center | Align Right |
 | :--- | :--- | :---: | ---: |
 | Left row data 1 | Sample value A | Center text | $100.00 |
+```
+
+Inline markdown is supported inside table cells:
+
+```markdown
+| Name | Status |
+| :--- | :---: |
+| **Current** | `active` |
+| ~~Retired~~ | [Details](https://example.com/) |
 ```
 
 Task list items are recognized in list items:
@@ -117,6 +150,15 @@ TestApp/MarkdownViewerDemo.dproj
 ```
 
 The demo creates `TMarkDownViewer` at runtime, so the package does not need to be installed into the IDE to try the component.
+
+## Keyboard Navigation
+
+When the viewer has focus, it supports:
+
+- Up and Down arrows
+- Page Up and Page Down
+- Home and End
+- Space and Shift+Space
 
 ## Building
 
