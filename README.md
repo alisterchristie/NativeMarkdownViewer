@@ -1,0 +1,119 @@
+# Kai Markdown Viewer
+
+Native VCL markdown viewer component for Delphi.
+
+`TMarkDownViewer` is a custom VCL control that renders markdown directly with VCL/GDI. It does not use WebView, HTML, or an embedded browser, and it can be created at runtime without installing the package into the IDE.
+
+## Contents
+
+- `MarkdownViewerVCL.pas` - component source
+- `KaiMarkdownViewer.dpk` - Delphi package source
+- `KaiMarkdownViewer.dproj` - package project
+- `TestApp/MarkdownViewerDemo.dproj` - VCL demo app
+- `TestApp/Demo.MainForm.pas` - demo form that creates `TMarkDownViewer` at runtime
+
+## Features
+
+Supported rendering includes:
+
+- Headings
+- Paragraphs
+- Bold and italic spans
+- Inline code
+- Fenced code blocks
+- Block quotes
+- Horizontal rules
+- Ordered and unordered lists
+- Task lists with checked and unchecked boxes
+- Pipe tables with left, center, and right alignment
+- Clickable markdown links
+- Vertical scrolling
+
+The table syntax supports the common markdown alignment row:
+
+```markdown
+| Header Column 1 | Header Column 2 | Align Center | Align Right |
+| :--- | :--- | :---: | ---: |
+| Left row data 1 | Sample value A | Center text | $100.00 |
+```
+
+Task list items are recognized in list items:
+
+```markdown
+- [x] Completed item
+- [ ] Remaining item
+```
+
+## Basic Usage
+
+Add `MarkdownViewerVCL` to your `uses` clause and create the control like any other VCL control:
+
+```pascal
+uses
+  MarkdownViewerVCL;
+
+var
+  Viewer: TMarkDownViewer;
+begin
+  Viewer := TMarkDownViewer.Create(Self);
+  Viewer.Parent := Self;
+  Viewer.Align := alClient;
+  Viewer.MarkdownText := '# Hello' + sLineBreak + sLineBreak + 'This is **markdown**.';
+end;
+```
+
+You can also assign lines:
+
+```pascal
+Viewer.Markdown.Assign(Memo1.Lines);
+```
+
+Or load from a file:
+
+```pascal
+Viewer.LoadFromFile('README.md');
+```
+
+## Links
+
+By default, clicking a markdown link opens it with `ShellExecute`. To handle links yourself, assign `OnLinkClick`:
+
+```pascal
+Viewer.OnLinkClick :=
+  procedure(Sender: TObject; const Url: string)
+  begin
+    ShowMessage(Url);
+  end;
+```
+
+## Demo Application
+
+Open and run:
+
+```text
+TestApp/MarkdownViewerDemo.dproj
+```
+
+The demo creates `TMarkDownViewer` at runtime, so the package does not need to be installed into the IDE to try the component.
+
+## Building
+
+Open `KaiMarkdownViewer.dproj` in RAD Studio and build the package.
+
+Command-line build example for RAD Studio 37.0:
+
+```bat
+call "C:\Program Files (x86)\Embarcadero\Studio\37.0\bin\rsvars.bat"
+MSBuild KaiMarkdownViewer.dproj /t:Build /p:Config=Debug /p:Platform=Win32
+```
+
+Build the demo:
+
+```bat
+cd TestApp
+MSBuild MarkdownViewerDemo.dproj /t:Build /p:Config=Debug /p:Platform=Win32
+```
+
+## Notes
+
+This is a lightweight native markdown renderer, not a full CommonMark implementation. It is intended for typical application help, notes, preview panes, and embedded documentation where native VCL rendering and simple deployment are more important than exhaustive markdown compatibility.

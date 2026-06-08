@@ -1,0 +1,65 @@
+# RAD Studio / Delphi local state
+*.local
+*.identcache
+*.stat
+*.tvsconfig
+*.dsk
+*.drc
+*.map
+*.mes
+*.otares
+
+# Delphi compiler outputs
+*.dcu
+*.dcuil
+*.dcp
+*.bpl
+*.bpi
+*.hpp
+*.lib
+*.obj
+*.o
+*.res
+*.rsm
+*.tds
+
+# Executables and libraries
+*.exe
+*.dll
+*.so
+*.dylib
+*.apk
+*.aab
+
+# Common RAD Studio output folders
+Win32/
+Win64/
+Win64x/
+WinARM64/
+WinARM64EC/
+Android/
+Android64/
+OSX32/
+OSX64/
+iOSDevice32/
+iOSDevice64/
+iOSSimulator/
+__history/
+__recovery/
+
+# Deployment and package staging
+*.deployproj
+deploy/
+PAServer/
+
+# Backups and temporary files
+*.bak
+*.~*
+*.$$$
+*.tmp
+*.log
+
+# IDE / editor folders
+.vs/
+.vscode/
+.idea/
