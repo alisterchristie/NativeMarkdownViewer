@@ -50,7 +50,7 @@ begin
 
   Source := TStringList.Create;
   try
-    Source.LoadFromFile(OpenTextFileDialog1.FileName);
+    Source.LoadFromFile(OpenTextFileDialog1.FileName, TEncoding.UTF8);
     FSourceText := Source.Text;
   finally
     Source.Free;
