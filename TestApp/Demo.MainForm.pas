@@ -28,9 +28,6 @@ type
     constructor Create(AOwner: TComponent); override;
   end;
 
-var
-  MainForm: TMainForm;
-
 implementation
 
 uses

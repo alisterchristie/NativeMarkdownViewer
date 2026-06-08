@@ -1,0 +1,48 @@
+﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+    <PropertyGroup>
+        <ProjectGuid>{C5C397A1-C27D-473D-BA34-6464459E4DC5}</ProjectGuid>
+    </PropertyGroup>
+    <ItemGroup>
+        <Projects Include="KaiMarkdownViewer.dproj">
+            <Dependencies/>
+        </Projects>
+        <Projects Include="TestApp\MarkdownViewerDemo.dproj">
+            <Dependencies/>
+        </Projects>
+    </ItemGroup>
+    <ProjectExtensions>
+        <Borland.Personality>Default.Personality.12</Borland.Personality>
+        <Borland.ProjectType/>
+        <BorlandProject>
+            <Default.Personality/>
+        </BorlandProject>
+    </ProjectExtensions>
+    <Target Name="KaiMarkdownViewer">
+        <MSBuild Projects="KaiMarkdownViewer.dproj"/>
+    </Target>
+    <Target Name="KaiMarkdownViewer:Clean">
+        <MSBuild Projects="KaiMarkdownViewer.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="KaiMarkdownViewer:Make">
+        <MSBuild Projects="KaiMarkdownViewer.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="MarkdownViewerDemo">
+        <MSBuild Projects="TestApp\MarkdownViewerDemo.dproj"/>
+    </Target>
+    <Target Name="MarkdownViewerDemo:Clean">
+        <MSBuild Projects="TestApp\MarkdownViewerDemo.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="MarkdownViewerDemo:Make">
+        <MSBuild Projects="TestApp\MarkdownViewerDemo.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="Build">
+        <CallTarget Targets="KaiMarkdownViewer;MarkdownViewerDemo"/>
+    </Target>
+    <Target Name="Clean">
+        <CallTarget Targets="KaiMarkdownViewer:Clean;MarkdownViewerDemo:Clean"/>
+    </Target>
+    <Target Name="Make">
+        <CallTarget Targets="KaiMarkdownViewer:Make;MarkdownViewerDemo:Make"/>
+    </Target>
+    <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
+</Project>
