@@ -14,13 +14,15 @@ uses
 type
   TMarkDownLinkClickEvent = procedure(Sender: TObject; const Url: string) of object;
 
-  TMarkDownBlockKind = (bkParagraph, bkHeading, bkQuote, bkListItem, bkCodeBlock, bkRule, bkTable);
+  TMarkDownBlockKind = (bkParagraph, bkHeading, bkQuote, bkListItem, bkCodeBlock, bkRule, bkTable, bkImage);
 
   TMarkDownBlock = class
   public
     Kind: TMarkDownBlockKind;
     Text: string;
+    Url: string;
     Level: Integer;
+    IndentLevel: Integer;
     Ordered: Boolean;
     Number: Integer;
     IsTask: Boolean;
@@ -45,11 +47,13 @@ type
     FLinkColor: TColor;
     FCodeBackgroundColor: TColor;
     FQuoteBarColor: TColor;
+    FBasePath: string;
     FOnLinkClick: TMarkDownLinkClickEvent;
     function GetMarkdown: TStrings;
     function GetMarkdownText: string;
     function IsMarkdownStored: Boolean;
     procedure MarkdownChanged(Sender: TObject);
+    procedure SetBasePath(const Value: string);
     procedure SetCodeBackgroundColor(const Value: TColor);
     procedure SetLinkColor(const Value: TColor);
     procedure SetMarkdown(const Value: TStrings);
@@ -74,6 +78,7 @@ type
   published
     property Align;
     property Anchors;
+    property BasePath: string read FBasePath write SetBasePath;
     property Color default clWindow;
     property CodeBackgroundColor: TColor read FCodeBackgroundColor write SetCodeBackgroundColor default $00F2F2F2;
     property Constraints;
@@ -112,7 +117,9 @@ uses
   System.Math,
   System.StrUtils,
   System.SysUtils,
-  Winapi.ShellAPI;
+  Winapi.ShellAPI,
+  Vcl.Imaging.jpeg,
+  Vcl.Imaging.pngimage;
 
 const
   MarkdownPadding = 14;
@@ -268,6 +275,45 @@ begin
     Text := Trim(Copy(T, 4, MaxInt));
 end;
 
+function CountLeadingSpaces(const S: string): Integer;
+var
+  I: Integer;
+begin
+  Result := 0;
+  for I := 1 to Length(S) do
+    if S[I] = ' ' then
+      Inc(Result)
+    else if S[I] = #9 then
+      Inc(Result, 4)
+    else
+      Break;
+end;
+
+function TryParseImage(const Line: string; out AltText, Url: string): Boolean;
+var
+  T: string;
+  CloseBracket: Integer;
+  CloseParen: Integer;
+begin
+  T := Trim(Line);
+  Result := Copy(T, 1, 2) = '![';
+  if not Result then
+    Exit;
+
+  CloseBracket := PosEx(']', T, 3);
+  Result := (CloseBracket > 2) and (CloseBracket < Length(T)) and (T[CloseBracket + 1] = '(');
+  if not Result then
+    Exit;
+
+  CloseParen := PosEx(')', T, CloseBracket + 2);
+  Result := CloseParen > CloseBracket + 2;
+  if Result then
+  begin
+    AltText := Copy(T, 3, CloseBracket - 3);
+    Url := Copy(T, CloseBracket + 2, CloseParen - CloseBracket - 2);
+  end;
+end;
+
 function TryParseHeading(const Line: string; out Text: string; out Level: Integer): Boolean;
 var
   I: Integer;
@@ -284,7 +330,8 @@ begin
     Text := Trim(Copy(T, I + 1, MaxInt));
 end;
 
-function TryParseListItem(const Line: string; out Text: string; out Ordered: Boolean; out Number: Integer): Boolean;
+function TryParseListItem(const Line: string; out Text: string; out Ordered: Boolean; out Number: Integer;
+  out IndentLevel: Integer): Boolean;
 var
   I: Integer;
   T: string;
@@ -294,6 +341,7 @@ begin
   Result := False;
   Ordered := False;
   Number := 0;
+  IndentLevel := CountLeadingSpaces(Line) div 2;
 
   if (Length(T) >= 2) and CharInSet(T[1], ['-', '*', '+']) and CharInSet(T[2], [' ', #9]) then
   begin
@@ -321,7 +369,9 @@ begin
   Result := TMarkDownBlock.Create;
   Result.Kind := AKind;
   Result.Text := Text;
+  Result.Url := '';
   Result.Level := 0;
+  Result.IndentLevel := 0;
   Result.Ordered := False;
   Result.Number := 0;
   Result.IsTask := False;
@@ -336,8 +386,11 @@ var
   QuoteText: string;
   CodeText: string;
   TableText: string;
+  ImageAlt: string;
+  ImageUrl: string;
   ParagraphText: string;
   Level: Integer;
+  IndentLevel: Integer;
   Number: Integer;
   Ordered: Boolean;
   IsTask: Boolean;
@@ -378,6 +431,16 @@ begin
     if Trim(Lines[I]) = '' then
     begin
       CommitParagraph;
+      Inc(I);
+      Continue;
+    end;
+
+    if TryParseImage(Lines[I], ImageAlt, ImageUrl) then
+    begin
+      CommitParagraph;
+      Block := NewBlock(bkImage, ImageAlt);
+      Block.Url := ImageUrl;
+      Result.Add(Block);
       Inc(I);
       Continue;
     end;
@@ -428,13 +491,14 @@ begin
       Continue;
     end;
 
-    if TryParseListItem(Lines[I], ListText, Ordered, Number) then
+    if TryParseListItem(Lines[I], ListText, Ordered, Number, IndentLevel) then
     begin
       CommitParagraph;
       ExtractTaskMarker(ListText, IsTask, TaskChecked);
       Block := NewBlock(bkListItem, ListText);
       Block.Ordered := Ordered;
       Block.Number := Number;
+      Block.IndentLevel := IndentLevel;
       Block.IsTask := IsTask;
       Block.TaskChecked := TaskChecked;
       Result.Add(Block);
@@ -613,6 +677,7 @@ end;
 
 procedure TMarkDownViewer.LoadFromFile(const FileName: string);
 begin
+  FBasePath := ExtractFilePath(FileName);
   FMarkdown.LoadFromFile(FileName);
 end;
 
@@ -690,6 +755,7 @@ var
   R: TRect;
   CheckRect: TRect;
   Bullet: string;
+  ListLeft: Integer;
   TextIndent: Integer;
 
   procedure AssignBaseFont(Style: TFontStyles; SizeDelta: Integer; const FontName: string = '');
@@ -805,6 +871,72 @@ var
     Result := YPos + LineHeight - ATop;
   end;
 
+  function ResolveImagePath(const Url: string): string;
+  begin
+    Result := Trim(Url);
+    if (Result = '') or ContainsText(Result, '://') then
+      Exit;
+
+    if ExtractFileDrive(Result) <> '' then
+      Exit;
+    if Copy(Result, 1, 2) = '\\' then
+      Exit;
+
+    if FBasePath <> '' then
+      Result := ExpandFileName(IncludeTrailingPathDelimiter(FBasePath) + Result)
+    else
+      Result := ExpandFileName(Result);
+  end;
+
+  function DrawImageBlock(const AltText, Url: string; ALeft, ATop, AWidth: Integer): Integer;
+  var
+    Picture: TPicture;
+    ImagePath: string;
+    DrawWidth: Integer;
+    DrawHeight: Integer;
+    TextRect: TRect;
+    OldBkMode: Integer;
+  begin
+    Result := Canvas.TextHeight('Wg') + 10;
+    ImagePath := ResolveImagePath(Url);
+    if (ImagePath = '') or ContainsText(ImagePath, '://') or not FileExists(ImagePath) then
+    begin
+      Canvas.Font.Assign(Font);
+      Canvas.Font.Style := [fsItalic];
+      TextRect := Rect(ALeft, ATop, ALeft + AWidth, ATop + Result);
+      OldBkMode := SetBkMode(Canvas.Handle, TRANSPARENT);
+      DrawText(Canvas.Handle, PChar(AltText), Length(AltText), TextRect, DT_LEFT or DT_VCENTER or DT_SINGLELINE or DT_END_ELLIPSIS);
+      SetBkMode(Canvas.Handle, OldBkMode);
+      Exit;
+    end;
+
+    Picture := TPicture.Create;
+    try
+      try
+        Picture.LoadFromFile(ImagePath);
+      except
+        Canvas.Font.Assign(Font);
+        Canvas.Font.Style := [fsItalic];
+        TextRect := Rect(ALeft, ATop, ALeft + AWidth, ATop + Result);
+        OldBkMode := SetBkMode(Canvas.Handle, TRANSPARENT);
+        DrawText(Canvas.Handle, PChar(AltText), Length(AltText), TextRect, DT_LEFT or DT_VCENTER or DT_SINGLELINE or DT_END_ELLIPSIS);
+        SetBkMode(Canvas.Handle, OldBkMode);
+        Exit;
+      end;
+
+      if (Picture.Width <= 0) or (Picture.Height <= 0) then
+        Exit;
+
+      DrawWidth := Min(AWidth, Picture.Width);
+      DrawHeight := MulDiv(Picture.Height, DrawWidth, Picture.Width);
+      if (ATop + DrawHeight >= 0) and (ATop <= ClientHeight) then
+        Canvas.StretchDraw(Rect(ALeft, ATop, ALeft + DrawWidth, ATop + DrawHeight), Picture.Graphic);
+      Result := DrawHeight;
+    finally
+      Picture.Free;
+    end;
+  end;
+
   function TableAlignmentFromCell(const Cell: string): TAlignment;
   var
     T: string;
@@ -828,10 +960,11 @@ var
     Rows: TObjectList<TStringList>;
     AlignCells: TStringList;
     ColWidths: array of Integer;
+    RowHeights: array of Integer;
     Aligns: array of TAlignment;
     ColCount: Integer;
     RowHeight: Integer;
-    VisibleRow: Integer;
+    RowTop: Integer;
     SourceIndex: Integer;
     Col: Integer;
     X: Integer;
@@ -841,6 +974,20 @@ var
     TextRect: TRect;
     Flags: Integer;
     OldBkMode: Integer;
+
+    function MeasureCellHeight(const AText: string; ACellWidth: Integer; AHeader: Boolean): Integer;
+    var
+      MeasureRect: TRect;
+    begin
+      Canvas.Font.Assign(Font);
+      if AHeader then
+        Canvas.Font.Style := [fsBold]
+      else
+        Canvas.Font.Style := [];
+      MeasureRect := Rect(0, 0, Max(1, ACellWidth - 16), 0);
+      DrawText(Canvas.Handle, PChar(AText), Length(AText), MeasureRect, DT_WORDBREAK or DT_CALCRECT or DT_NOPREFIX);
+      Result := Max(Canvas.TextHeight('Wg') + 14, MeasureRect.Height + 14);
+    end;
   begin
     Result := 0;
     SourceLines := TStringList.Create;
@@ -865,6 +1012,7 @@ var
 
       SplitTableRow(SourceLines[1], AlignCells);
       SetLength(ColWidths, ColCount);
+      SetLength(RowHeights, Rows.Count);
       SetLength(Aligns, ColCount);
       AssignBaseFont([], 0);
       for Col := 0 to ColCount - 1 do
@@ -892,17 +1040,32 @@ var
       else if ColCount > 0 then
         Inc(ColWidths[ColCount - 1], AWidth - TotalWidth);
 
-      RowHeight := Canvas.TextHeight('Wg') + 14;
-      VisibleRow := 0;
+      for SourceIndex := 0 to Rows.Count - 1 do
+      begin
+        if SourceIndex = 1 then
+          Continue;
+        RowHeights[SourceIndex] := Canvas.TextHeight('Wg') + 14;
+        for Col := 0 to ColCount - 1 do
+        begin
+          if Col < Rows[SourceIndex].Count then
+            CellText := Rows[SourceIndex][Col]
+          else
+            CellText := '';
+          RowHeights[SourceIndex] := Max(RowHeights[SourceIndex], MeasureCellHeight(CellText, ColWidths[Col], SourceIndex = 0));
+        end;
+      end;
+
+      RowTop := ATop;
       for SourceIndex := 0 to Rows.Count - 1 do
       begin
         if SourceIndex = 1 then
           Continue;
 
+        RowHeight := RowHeights[SourceIndex];
         X := ALeft;
         for Col := 0 to ColCount - 1 do
         begin
-          CellRect := Rect(X, ATop + (VisibleRow * RowHeight), X + ColWidths[Col], ATop + ((VisibleRow + 1) * RowHeight));
+          CellRect := Rect(X, RowTop, X + ColWidths[Col], RowTop + RowHeight);
           if SourceIndex = 0 then
             Canvas.Brush.Color := $00F7F7F7
           else
@@ -924,8 +1087,8 @@ var
           else
             Canvas.Font.Style := [];
 
-          TextRect := Rect(CellRect.Left + 8, CellRect.Top + 1, CellRect.Right - 8, CellRect.Bottom - 1);
-          Flags := DT_SINGLELINE or DT_VCENTER or DT_END_ELLIPSIS;
+          TextRect := Rect(CellRect.Left + 8, CellRect.Top + 7, CellRect.Right - 8, CellRect.Bottom - 7);
+          Flags := DT_WORDBREAK or DT_NOPREFIX;
           case Aligns[Col] of
             taCenter:
               Flags := Flags or DT_CENTER;
@@ -939,10 +1102,10 @@ var
           SetBkMode(Canvas.Handle, OldBkMode);
           Inc(X, ColWidths[Col]);
         end;
-        Inc(VisibleRow);
+        Inc(RowTop, RowHeight);
       end;
 
-      Result := VisibleRow * RowHeight;
+      Result := RowTop - ATop;
     finally
       AlignCells.Free;
       Rows.Free;
@@ -992,10 +1155,11 @@ begin
       bkListItem:
         begin
           AssignBaseFont([], 0);
+          ListLeft := TextLeft + (Max(0, Block.IndentLevel) * 22);
           TextIndent := 28;
           if Block.IsTask then
           begin
-            CheckRect := Rect(TextLeft, Y + 3, TextLeft + 15, Y + 18);
+            CheckRect := Rect(ListLeft, Y + 3, ListLeft + 15, Y + 18);
             if Block.TaskChecked then
               DrawFrameControl(Canvas.Handle, CheckRect, DFC_BUTTON, DFCS_BUTTONCHECK or DFCS_CHECKED)
             else
@@ -1007,15 +1171,21 @@ begin
               Bullet := IntToStr(Block.Number) + '.'
             else
               Bullet := #$2022;
-            Canvas.TextOut(TextLeft, Y + 2, Bullet);
+            Canvas.TextOut(ListLeft, Y + 2, Bullet);
           end;
           Tokens := ParseInline(Block.Text);
           try
-            TokenHeight := DrawInline(Tokens, TextLeft + TextIndent, Y, ContentWidth - TextIndent, True);
+            TokenHeight := DrawInline(Tokens, ListLeft + TextIndent, Y,
+              Max(10, ContentWidth - (ListLeft - TextLeft) - TextIndent), True);
           finally
             Tokens.Free;
           end;
           Inc(Y, TokenHeight + 3);
+        end;
+      bkImage:
+        begin
+          TokenHeight := DrawImageBlock(Block.Text, Block.Url, TextLeft, Y, ContentWidth);
+          Inc(Y, TokenHeight + ParagraphSpacing);
         end;
       bkTable:
         begin
@@ -1080,6 +1250,15 @@ begin
   if FCodeBackgroundColor <> Value then
   begin
     FCodeBackgroundColor := Value;
+    Invalidate;
+  end;
+end;
+
+procedure TMarkDownViewer.SetBasePath(const Value: string);
+begin
+  if FBasePath <> Value then
+  begin
+    FBasePath := Value;
     Invalidate;
   end;
 end;

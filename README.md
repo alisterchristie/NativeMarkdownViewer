@@ -24,8 +24,10 @@ Supported rendering includes:
 - Block quotes
 - Horizontal rules
 - Ordered and unordered lists
+- Nested list indentation
 - Task lists with checked and unchecked boxes
 - Pipe tables with left, center, and right alignment
+- Local images with scaled rendering and alt-text fallback
 - Clickable markdown links
 - Vertical scrolling
 
@@ -42,6 +44,20 @@ Task list items are recognized in list items:
 ```markdown
 - [x] Completed item
 - [ ] Remaining item
+```
+
+Nested list indentation is based on leading spaces:
+
+```markdown
+- Parent item
+  - Child item
+    - Grandchild item
+```
+
+Images use standard markdown image syntax. Local paths are resolved relative to `BasePath`, or relative to the loaded markdown file when using `LoadFromFile`.
+
+```markdown
+![Alt text](images/example.png)
 ```
 
 ## Basic Usage
@@ -72,6 +88,12 @@ Or load from a file:
 
 ```pascal
 Viewer.LoadFromFile('README.md');
+```
+
+When loading from a file, `BasePath` is set automatically to the markdown file folder so relative image paths resolve naturally. You can also set it yourself:
+
+```pascal
+Viewer.BasePath := ExtractFilePath(Application.ExeName);
 ```
 
 ## Links

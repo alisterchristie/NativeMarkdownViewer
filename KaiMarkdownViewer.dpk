@@ -29,7 +29,8 @@ package KaiMarkdownViewer;
 
 requires
   rtl,
-  vcl;
+  vcl,
+  vclimg;
 
 contains
   MarkdownViewerVCL in 'MarkdownViewerVCL.pas';

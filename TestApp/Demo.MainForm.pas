@@ -44,10 +44,12 @@ This is a native **VCL** markdown viewer component. It paints markdown text dire
 - Headings
 - **Bold** and *italic* spans
 - Ordered and unordered lists
+- Nested lists
 - Block quotes
 - Code blocks
 - Tables
 - Task lists
+- Local images with fallback alt text
 - [Clickable links](https://www.embarcadero.com/)
 
 > The component is in the package, but this demo creates it in code so it does not need to be installed in the IDE.
@@ -67,7 +69,24 @@ This is a native **VCL** markdown viewer component. It paints markdown text dire
 ## Task Lists
 - [x] Verified basic structural formatting
 - [x] Verified lists and syntax blocks
+  - [x] Nested completed task
+  - [ ] Nested pending task
 - [ ] Remaining item to be completed
+
+---
+
+## Nested Lists
+- Top-level item
+  - Nested item
+    - Deeper nested item
+- Another top-level item
+
+---
+
+## Images
+![Sample local image alt text](sample-image.jpg)
+
+If the image path is missing or remote, the viewer displays the alt text.
 
 ---
 
