@@ -37,7 +37,8 @@ Supported rendering includes:
 - Vertical scrolling
 - Keyboard scrolling
 - Mouse text selection
-- Copy selected text with `Ctrl+C`
+- Copy selected markdown with `Ctrl+C`
+- Copy selected plain text with `Ctrl+Shift+C`
 - Case-insensitive find highlighting
 
 Strikethrough uses double tildes:
@@ -179,7 +180,8 @@ When the viewer has focus, it supports:
 - Home and End
 - Space and Shift+Space
 - Ctrl+A
-- Ctrl+C
+- Ctrl+C to copy selected markdown
+- Ctrl+Shift+C to copy selected plain text
 - Escape to clear selection
 
 ## Building

@@ -41,6 +41,7 @@ type
     FontName: string;
     FontSize: Integer;
     FontStyle: TFontStyles;
+    MarkdownText: string;
     Rect: TRect;
     StartIndex: Integer;
     Text: string;
@@ -48,12 +49,21 @@ type
 
   TMarkDownTextRunList = TList<TMarkDownTextRun>;
 
+  TMarkDownCopyChunk = record
+    MarkdownText: string;
+    StartIndex: Integer;
+    Text: string;
+  end;
+
+  TMarkDownCopyChunkList = TList<TMarkDownCopyChunk>;
+
   TMarkDownViewer = class(TCustomControl)
   private
     FMarkdown: TStringList;
     FBlocks: TMarkDownBlockList;
     FLinkHits: TMarkDownLinkHitList;
     FTextRuns: TMarkDownTextRunList;
+    FCopyChunks: TMarkDownCopyChunkList;
     FSelectableText: string;
     FScrollPos: Integer;
     FContentHeight: Integer;
@@ -74,7 +84,7 @@ type
     function HitTestTextPosition(X, Y: Integer): Integer;
     function IsMarkdownStored: Boolean;
     procedure ClearSelection;
-    procedure CopySelectionToClipboard;
+    procedure CopySelectionToClipboard(PlainText: Boolean);
     procedure MarkdownChanged(Sender: TObject);
     procedure SelectAllText;
     procedure SetBasePath(const Value: string);
@@ -858,10 +868,12 @@ begin
   FBlocks := TMarkDownBlockList.Create(True);
   FLinkHits := TMarkDownLinkHitList.Create;
   FTextRuns := TMarkDownTextRunList.Create;
+  FCopyChunks := TMarkDownCopyChunkList.Create;
 end;
 
 destructor TMarkDownViewer.Destroy;
 begin
+  FCopyChunks.Free;
   FTextRuns.Free;
   FLinkHits.Free;
   FBlocks.Free;
@@ -894,8 +906,10 @@ begin
     case Key of
       Ord('A'):
         SelectAllText;
-      Ord('C'), VK_INSERT:
-        CopySelectionToClipboard;
+      Ord('C'):
+        CopySelectionToClipboard(ssShift in Shift);
+      VK_INSERT:
+        CopySelectionToClipboard(True);
     else
       Handled := False;
     end;
@@ -1018,8 +1032,13 @@ begin
   end;
 end;
 
-procedure TMarkDownViewer.CopySelectionToClipboard;
+procedure TMarkDownViewer.CopySelectionToClipboard(PlainText: Boolean);
 var
+  Chunk: TMarkDownCopyChunk;
+  ChunkIndex: Integer;
+  LocalEnd: Integer;
+  LocalStart: Integer;
+  MarkdownSelection: string;
   SelStart: Integer;
   SelEnd: Integer;
 begin
@@ -1028,7 +1047,40 @@ begin
 
   SelStart := Min(FSelectionAnchor, FSelectionCaret);
   SelEnd := Max(FSelectionAnchor, FSelectionCaret);
-  Clipboard.AsText := Copy(FSelectableText, SelStart + 1, SelEnd - SelStart);
+  if PlainText then
+  begin
+    Clipboard.AsText := Copy(FSelectableText, SelStart + 1, SelEnd - SelStart);
+    Exit;
+  end;
+
+  if (SelStart = 0) and (SelEnd = Length(FSelectableText)) then
+  begin
+    Clipboard.AsText := FMarkdown.Text;
+    Exit;
+  end;
+
+  MarkdownSelection := '';
+  for ChunkIndex := 0 to FCopyChunks.Count - 1 do
+  begin
+    Chunk := FCopyChunks[ChunkIndex];
+    if Chunk.Text = '' then
+      Continue;
+    if (SelEnd <= Chunk.StartIndex) or
+      (SelStart >= Chunk.StartIndex + Length(Chunk.Text)) then
+      Continue;
+
+    LocalStart := Max(0, SelStart - Chunk.StartIndex);
+    LocalEnd := Min(Length(Chunk.Text), SelEnd - Chunk.StartIndex);
+    if LocalStart >= LocalEnd then
+      Continue;
+
+    if (LocalStart = 0) and (LocalEnd = Length(Chunk.Text)) then
+      MarkdownSelection := MarkdownSelection + Chunk.MarkdownText
+    else
+      MarkdownSelection := MarkdownSelection + Copy(Chunk.Text, LocalStart + 1, LocalEnd - LocalStart);
+  end;
+
+  Clipboard.AsText := MarkdownSelection;
 end;
 
 procedure TMarkDownViewer.LoadFromFile(const FileName: string);
@@ -1051,6 +1103,8 @@ begin
   FSelectableText := '';
   if FTextRuns <> nil then
     FTextRuns.Clear;
+  if FCopyChunks <> nil then
+    FCopyChunks.Clear;
   Invalidate;
   UpdateScrollBar;
 end;
@@ -1169,7 +1223,24 @@ var
     end;
   end;
 
-  function AddSelectableRun(const ARect: TRect; const AText: string): Integer;
+  procedure AddCopyChunk(TextStart: Integer; const AText, AMarkdownText: string);
+  var
+    Chunk: TMarkDownCopyChunk;
+  begin
+    if AText = '' then
+      Exit;
+
+    Chunk.StartIndex := TextStart;
+    Chunk.Text := AText;
+    if AMarkdownText <> '' then
+      Chunk.MarkdownText := AMarkdownText
+    else
+      Chunk.MarkdownText := AText;
+    FCopyChunks.Add(Chunk);
+  end;
+
+  function AddSelectableRun(const ARect: TRect; const AText: string;
+    const AMarkdownText: string = ''): Integer;
   var
     Run: TMarkDownTextRun;
   begin
@@ -1181,16 +1252,27 @@ var
     Run.FontName := Canvas.Font.Name;
     Run.FontSize := Canvas.Font.Size;
     Run.FontStyle := Canvas.Font.Style;
+    if AMarkdownText <> '' then
+      Run.MarkdownText := AMarkdownText
+    else
+      Run.MarkdownText := AText;
     Run.StartIndex := Result;
     Run.Text := AText;
     FTextRuns.Add(Run);
     FSelectableText := FSelectableText + AText;
+    AddCopyChunk(Result, AText, AMarkdownText);
   end;
 
-  procedure AddSelectableText(const AText: string);
+  procedure AddSelectableText(const AText: string; const AMarkdownText: string = '');
+  var
+    TextStart: Integer;
   begin
-    if AText <> '' then
-      FSelectableText := FSelectableText + AText;
+    if AText = '' then
+      Exit;
+
+    TextStart := Length(FSelectableText);
+    FSelectableText := FSelectableText + AText;
+    AddCopyChunk(TextStart, AText, AMarkdownText);
   end;
 
   procedure AddSelectableBreak;
@@ -1198,7 +1280,7 @@ var
     if FSelectableText = '' then
       Exit;
     if not EndsText(sLineBreak, FSelectableText) then
-      FSelectableText := FSelectableText + sLineBreak;
+      AddSelectableText(sLineBreak);
   end;
 
   procedure DrawSelectionBackground(const AText: string; TextX, TextY, TextHeight, TextStart: Integer);
@@ -1349,6 +1431,29 @@ var
     OldBkMode: Integer;
     TextStart: Integer;
 
+    function MarkdownForAtom(const Token: TMarkDownInlineToken; const AtomText: string): string;
+    begin
+      if Trim(AtomText) = '' then
+        Exit(AtomText);
+
+      case Token.Kind of
+        ikBold:
+          Result := '**' + AtomText + '**';
+        ikItalic:
+          Result := '*' + AtomText + '*';
+        ikBoldItalic:
+          Result := '***' + AtomText + '***';
+        ikCode:
+          Result := '`' + AtomText + '`';
+        ikLink:
+          Result := '[' + AtomText + '](' + Token.Url + ')';
+        ikStrike:
+          Result := '~~' + AtomText + '~~';
+      else
+        Result := AtomText;
+      end;
+    end;
+
     procedure DrawSearchHighlights(const AText: string; TextX, TextY, TextHeight: Integer);
     var
       SearchIn: string;
@@ -1457,7 +1562,7 @@ var
         if ADraw then
         begin
           AtomRect := Rect(X, YPos, X + AtomWidth, YPos + LineHeight);
-          TextStart := AddSelectableRun(AtomRect, Atom);
+          TextStart := AddSelectableRun(AtomRect, Atom, MarkdownForAtom(ATokens[TokenIndex], Atom));
           if (YPos + LineHeight >= 0) and (YPos <= ClientHeight) then
           begin
             if ATokens[TokenIndex].Kind = ikCode then
@@ -1734,6 +1839,7 @@ begin
 
   FLinkHits.Clear;
   FTextRuns.Clear;
+  FCopyChunks.Clear;
   FSelectableText := '';
 
   Blocks := FBlocks;
