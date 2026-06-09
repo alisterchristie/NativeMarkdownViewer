@@ -75,7 +75,9 @@ $(PostBuildEvent)]]></PostBuildEvent>
         <DelphiCompile Include="$(MainSource)">
             <MainSource>MainSource</MainSource>
         </DelphiCompile>
-        <DCCReference Include="Demo.MainForm.pas"/>
+        <DCCReference Include="Demo.MainForm.pas">
+            <Form>MainForm</Form>
+        </DCCReference>
         <DCCReference Include="..\MarkdownViewerVCL.pas"/>
         <DCCReference Include="Demo.IntroForm.pas">
             <Form>frmIntro</Form>

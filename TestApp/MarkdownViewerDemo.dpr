@@ -2,7 +2,7 @@ program MarkdownViewerDemo;
 
 uses
   Vcl.Forms,
-  Demo.MainForm in 'Demo.MainForm.pas',
+  Demo.MainForm in 'Demo.MainForm.pas' {MainForm},
   MarkdownViewerVCL in '..\MarkdownViewerVCL.pas',
   Demo.IntroForm in 'Demo.IntroForm.pas' {frmIntro},
   Demo.StreamingForm in 'Demo.StreamingForm.pas' {frmStreaming};

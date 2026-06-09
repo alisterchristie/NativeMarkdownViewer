@@ -12,27 +12,29 @@ uses
 
 type
   TMainForm = class(TForm)
-  private
-    FEditor: TMemo;
-    FFindEdit: TEdit;
-    FFindLabel: TLabel;
-    FFindPanel: TPanel;
-    FSplitter: TSplitter;
-    FViewer: TMarkDownViewer;
+    Editor: TMemo;
+    FindEdit: TEdit;
+    FindLabel: TLabel;
+    FindPanel: TPanel;
+    Splitter: TSplitter;
+    Viewer: TMarkDownViewer;
     procedure EditorChanged(Sender: TObject);
     procedure FindChanged(Sender: TObject);
+    procedure FormCreate(Sender: TObject);
     procedure LinkClicked(Sender: TObject; const Url: string);
+  private
   protected
     procedure CreateParams(var Params: TCreateParams); override;
-  public
-    constructor Create(AOwner: TComponent); override;
   end;
 
 implementation
 
 uses
+  System.SysUtils,
   Winapi.Windows,
   Vcl.Dialogs;
+
+{$R *.dfm}
 
 const
   SampleMarkdown = '''
@@ -121,68 +123,22 @@ begin
   Params.ExStyle := (Params.ExStyle or WS_EX_APPWINDOW) and not WS_EX_TOOLWINDOW;
 end;
 
-constructor TMainForm.Create(AOwner: TComponent);
-begin
-  inherited CreateNew(AOwner);
-  Caption := 'TMarkDownViewer Demo';
-  Width := 980;
-  Height := 680;
-  Position := poScreenCenter;
-
-  FFindPanel := TPanel.Create(Self);
-  FFindPanel.Parent := Self;
-  FFindPanel.Align := alTop;
-  FFindPanel.Height := 34;
-  FFindPanel.BevelOuter := bvNone;
-
-  FFindLabel := TLabel.Create(Self);
-  FFindLabel.Parent := FFindPanel;
-  FFindLabel.Left := 10;
-  FFindLabel.Top := 9;
-  FFindLabel.Caption := 'Find';
-
-  FFindEdit := TEdit.Create(Self);
-  FFindEdit.Parent := FFindPanel;
-  FFindEdit.Left := 48;
-  FFindEdit.Top := 5;
-  FFindEdit.Width := 260;
-  FFindEdit.Anchors := [akLeft, akTop, akRight];
-
-  FEditor := TMemo.Create(Self);
-  FEditor.Parent := Self;
-  FEditor.Align := alLeft;
-  FEditor.Width := 390;
-  FEditor.ScrollBars := ssBoth;
-  FEditor.WordWrap := True;
-  FEditor.Lines.Text := SampleMarkdown;
-
-  FSplitter := TSplitter.Create(Self);
-  FSplitter.Parent := Self;
-  FSplitter.Align := alLeft;
-  FSplitter.Width := 6;
-
-  FViewer := TMarkDownViewer.Create(Self);
-  FViewer.Parent := Self;
-  FViewer.Align := alClient;
-  FViewer.OnLinkClick := LinkClicked;
-  FViewer.MarkdownText := SampleMarkdown;
-  FEditor.OnChange := EditorChanged;
-
-  FFindEdit.OnChange := FindChanged;
-  FFindEdit.Text := 'markdown';
-  FindChanged(FFindEdit);
-end;
-
 procedure TMainForm.EditorChanged(Sender: TObject);
 begin
-  if FViewer <> nil then
-    FViewer.Markdown.Assign(FEditor.Lines);
+  Viewer.Markdown.Assign(Editor.Lines);
 end;
 
 procedure TMainForm.FindChanged(Sender: TObject);
 begin
-  if FViewer <> nil then
-    FViewer.SearchText := FFindEdit.Text;
+  Viewer.SearchText := FindEdit.Text;
+end;
+
+procedure TMainForm.FormCreate(Sender: TObject);
+begin
+  Editor.Lines.Text := SampleMarkdown;
+  Viewer.BasePath := ExtractFilePath(Application.ExeName);
+  Viewer.MarkdownText := SampleMarkdown;
+  FindEdit.Text := 'markdown';
 end;
 
 procedure TMainForm.LinkClicked(Sender: TObject; const Url: string);
