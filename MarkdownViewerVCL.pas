@@ -904,6 +904,7 @@ begin
   FLinkHits := TMarkDownLinkHitList.Create;
   FTextRuns := TMarkDownTextRunList.Create;
   FCopyChunks := TMarkDownCopyChunkList.Create;
+  Font.Size := 10;
 end;
 
 destructor TMarkDownViewer.Destroy;
@@ -1354,6 +1355,7 @@ var
   Bullet: string;
   ListMarker: string;
   ListLeft: Integer;
+  MarkerLeft: Integer;
   TextIndent: Integer;
   LineTextStart: Integer;
   OldBkMode: Integer;
@@ -2043,11 +2045,12 @@ begin
       bkListItem:
         begin
           AssignBaseFont([], 0);
-          ListLeft := TextLeft + (Max(0, Block.IndentLevel) * 22);
-          TextIndent := 28;
+          ListLeft := TextLeft + (Max(0, Block.IndentLevel) * 16);
+          TextIndent := 22;
           if Block.IsTask then
           begin
-            CheckRect := Rect(ListLeft, Y + 3, ListLeft + 15, Y + 18);
+            MarkerLeft := ListLeft + Max(0, (TextIndent - 15) div 2);
+            CheckRect := Rect(MarkerLeft, Y + 3, MarkerLeft + 15, Y + 18);
             if Block.TaskChecked then
               DrawFrameControl(Canvas.Handle, CheckRect, DFC_BUTTON, DFCS_BUTTONCHECK or DFCS_CHECKED)
             else
@@ -2056,10 +2059,17 @@ begin
           else
           begin
             if Block.Ordered then
-              Bullet := IntToStr(Block.Number) + '.'
+            begin
+              Bullet := IntToStr(Block.Number) + '.';
+              MarkerLeft := ListLeft + Max(0, (TextIndent - Canvas.TextWidth(Bullet)) div 2);
+              Canvas.TextOut(MarkerLeft, Y, Bullet);
+            end
             else
-              Bullet := #$2022;
-            Canvas.TextOut(ListLeft, Y + 2, Bullet);
+            begin
+              Bullet := #$25CF;
+              MarkerLeft := ListLeft + Max(0, (TextIndent - Canvas.TextWidth(Bullet)) div 2);
+              Canvas.TextOut(MarkerLeft, Y, Bullet);
+            end;
           end;
 
           if Block.IsTask then
