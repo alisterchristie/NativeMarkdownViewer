@@ -2037,6 +2037,7 @@ begin
           R := Rect(TextLeft, Y + 2, TextLeft + 4, Y + TokenHeight);
           Canvas.Brush.Color := FQuoteBarColor;
           Canvas.FillRect(R);
+          Canvas.Brush.Color := Color;
           Inc(Y, TokenHeight + ParagraphSpacing);
         end;
       bkListItem:
