@@ -79,6 +79,9 @@ $(PostBuildEvent)]]></PostBuildEvent>
             <Form>MainForm</Form>
         </DCCReference>
         <DCCReference Include="..\MarkdownViewerVCL.pas"/>
+        <DCCReference Include="..\MarkdownViewer.Model.pas"/>
+        <DCCReference Include="..\MarkdownViewer.Parser.pas"/>
+        <DCCReference Include="..\MarkdownViewer.Renderer.pas"/>
         <DCCReference Include="Demo.IntroForm.pas">
             <Form>frmIntro</Form>
             <FormType>dfm</FormType>

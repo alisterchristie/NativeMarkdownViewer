@@ -1,4 +1,4 @@
-unit MarkdownViewerVCL;
+﻿unit MarkdownViewerVCL;
 
 interface
 
@@ -9,70 +9,11 @@ uses
   Winapi.Messages,
   Winapi.Windows,
   Vcl.Controls,
-  Vcl.Graphics;
+  Vcl.Graphics,
+  MarkdownViewer.Model;
 
 type
   TMarkDownLinkClickEvent = procedure(Sender: TObject; const Url: string) of object;
-
-  TMarkDownBlockKind = (bkParagraph, bkHeading, bkQuote, bkListItem, bkCodeBlock, bkRule, bkTable, bkImage);
-
-  TMarkDownInlineKind = (ikText, ikBold, ikItalic, ikBoldItalic, ikCode, ikLink, ikStrike);
-
-  TMarkDownInlineToken = record
-    Kind: TMarkDownInlineKind;
-    Text: string;
-    Url: string;
-  end;
-
-  TMarkDownInlineList = TList<TMarkDownInlineToken>;
-
-  TMarkDownBlock = class
-  public
-    Kind: TMarkDownBlockKind;
-    Text: string;
-    Url: string;
-    Level: Integer;
-    IndentLevel: Integer;
-    Ordered: Boolean;
-    Number: Integer;
-    IsTask: Boolean;
-    TaskChecked: Boolean;
-    SourceStartLine: Integer;
-    InlineTokens: TMarkDownInlineList;
-    LayoutTop: Integer;
-    LayoutHeight: Integer;
-    LayoutWidth: Integer;
-    constructor Create;
-    destructor Destroy; override;
-  end;
-
-  TMarkDownLinkHit = record
-    Rect: TRect;
-    Url: string;
-  end;
-
-  TMarkDownBlockList = TObjectList<TMarkDownBlock>;
-  TMarkDownLinkHitList = TList<TMarkDownLinkHit>;
-
-  TMarkDownTextRun = record
-    FontName: string;
-    FontSize: Integer;
-    FontStyle: TFontStyles;
-    MarkdownText: string;
-    Rect: TRect;
-    StartIndex: Integer;
-    Text: string;
-  end;
-
-  TMarkDownTextRunList = TList<TMarkDownTextRun>;
-
-  TMarkDownCopyChunk = record
-    MarkdownText: string;
-    StartIndex: Integer;
-    Text: string;
-  end;
-
-  TMarkDownCopyChunkList = TList<TMarkDownCopyChunk>;
 
   TMarkDownViewer = class(TCustomControl)
   private
@@ -185,7 +126,9 @@ uses
   Winapi.ShellAPI,
   Vcl.Clipbrd,
   Vcl.Imaging.jpeg,
-  Vcl.Imaging.pngimage;
+  Vcl.Imaging.pngimage,
+  MarkdownViewer.Parser,
+  MarkdownViewer.Renderer;
 
 const
   MarkdownPadding = 14;
@@ -460,19 +403,6 @@ begin
   Result.SourceStartLine := SourceStartLine;
 end;
 
-constructor TMarkDownBlock.Create;
-begin
-  inherited Create;
-  LayoutHeight := -1;
-  LayoutWidth := -1;
-end;
-
-destructor TMarkDownBlock.Destroy;
-begin
-  InlineTokens.Free;
-  inherited Destroy;
-end;
-
 function ParseBlocks(Lines: TStrings; StartLine: Integer = 0): TMarkDownBlockList;
 var
   I: Integer;
@@ -511,13 +441,13 @@ begin
   I := Max(0, StartLine);
   while I < Lines.Count do
   begin
-    if StartsWithFence(Lines[I]) then
+    if TMarkDownBlockParser.StartsWithFence(Lines[I]) then
     begin
       CommitParagraph;
       BlockStartLine := I;
       Inc(I);
       CodeText := '';
-      while (I < Lines.Count) and not StartsWithFence(Lines[I]) do
+      while (I < Lines.Count) and not TMarkDownBlockParser.StartsWithFence(Lines[I]) do
       begin
         if CodeText <> '' then
           CodeText := CodeText + sLineBreak;
@@ -537,14 +467,14 @@ begin
       Continue;
     end;
 
-    if TryParseLinkReference(Lines[I], ReferenceName, ReferenceUrl) then
+    if TMarkDownBlockParser.TryParseLinkReference(Lines[I], ReferenceName, ReferenceUrl) then
     begin
       CommitParagraph;
       Inc(I);
       Continue;
     end;
 
-    if TryParseImage(Lines[I], ImageAlt, ImageUrl) then
+    if TMarkDownBlockParser.TryParseImage(Lines[I], ImageAlt, ImageUrl) then
     begin
       CommitParagraph;
       Block := NewBlock(bkImage, ImageAlt, I);
@@ -554,13 +484,14 @@ begin
       Continue;
     end;
 
-    if IsTableStart(Lines, I) then
+    if TMarkDownBlockParser.IsTableStart(Lines, I) then
     begin
       CommitParagraph;
       BlockStartLine := I;
       TableText := Lines[I] + sLineBreak + Lines[I + 1];
       Inc(I, 2);
-      while (I < Lines.Count) and (Trim(Lines[I]) <> '') and IsPipeTableRow(Lines[I]) do
+      while (I < Lines.Count) and (Trim(Lines[I]) <> '') and
+        TMarkDownBlockParser.IsPipeTableRow(Lines[I]) do
       begin
         TableText := TableText + sLineBreak + Lines[I];
         Inc(I);
@@ -569,7 +500,7 @@ begin
       Continue;
     end;
 
-    if TryParseHeading(Lines[I], HeadingText, Level) then
+    if TMarkDownBlockParser.TryParseHeading(Lines[I], HeadingText, Level) then
     begin
       CommitParagraph;
       Block := NewBlock(bkHeading, HeadingText, I);
@@ -579,7 +510,7 @@ begin
       Continue;
     end;
 
-    if IsRuleLine(Lines[I]) then
+    if TMarkDownBlockParser.IsRuleLine(Lines[I]) then
     begin
       CommitParagraph;
       Result.Add(NewBlock(bkRule, '', I));
@@ -587,25 +518,28 @@ begin
       Continue;
     end;
 
-    if Copy(TrimLeftOnly(Lines[I]), 1, 1) = '>' then
+    if Copy(TMarkDownBlockParser.TrimLeftOnly(Lines[I]), 1, 1) = '>' then
     begin
       CommitParagraph;
       BlockStartLine := I;
-      QuoteText := Trim(Copy(TrimLeftOnly(Lines[I]), 2, MaxInt));
+      QuoteText := Trim(Copy(TMarkDownBlockParser.TrimLeftOnly(Lines[I]), 2, MaxInt));
       Inc(I);
-      while (I < Lines.Count) and (Copy(TrimLeftOnly(Lines[I]), 1, 1) = '>') do
+      while (I < Lines.Count) and
+        (Copy(TMarkDownBlockParser.TrimLeftOnly(Lines[I]), 1, 1) = '>') do
       begin
-        QuoteText := QuoteText + ' ' + Trim(Copy(TrimLeftOnly(Lines[I]), 2, MaxInt));
+        QuoteText := QuoteText + ' ' +
+          Trim(Copy(TMarkDownBlockParser.TrimLeftOnly(Lines[I]), 2, MaxInt));
         Inc(I);
       end;
       Result.Add(NewBlock(bkQuote, QuoteText, BlockStartLine));
       Continue;
     end;
 
-    if TryParseListItem(Lines[I], ListText, Ordered, Number, IndentLevel) then
+    if TMarkDownBlockParser.TryParseListItem(Lines[I], ListText, Ordered,
+      Number, IndentLevel) then
     begin
       CommitParagraph;
-      ExtractTaskMarker(ListText, IsTask, TaskChecked);
+      TMarkDownBlockParser.ExtractTaskMarker(ListText, IsTask, TaskChecked);
       Block := NewBlock(bkListItem, ListText, I);
       Block.Ordered := Ordered;
       Block.Number := Number;
@@ -729,7 +663,8 @@ begin
   try
     References.Clear;
     for I := 0 to Lines.Count - 1 do
-      if TryParseLinkReference(Lines[I], ReferenceName, ReferenceUrl) then
+      if TMarkDownBlockParser.TryParseLinkReference(Lines[I], ReferenceName,
+        ReferenceUrl) then
         References.Values[ReferenceName] := ReferenceUrl;
   finally
     References.EndUpdate;
@@ -1352,6 +1287,7 @@ var
   LineIndex: Integer;
   R: TRect;
   CheckRect: TRect;
+  CanvasState: TCanvasState;
   Bullet: string;
   ListMarker: string;
   ListLeft: Integer;
@@ -1895,7 +1831,7 @@ var
       for SourceIndex := 0 to SourceLines.Count - 1 do
       begin
         Rows.Add(TStringList.Create);
-        SplitTableRow(SourceLines[SourceIndex], Rows.Last);
+        TMarkDownBlockParser.SplitTableRow(SourceLines[SourceIndex], Rows.Last);
         if SourceIndex <> 1 then
           ColCount := Max(ColCount, Rows.Last.Count);
       end;
@@ -1903,7 +1839,7 @@ var
       if ColCount = 0 then
         Exit;
 
-      SplitTableRow(SourceLines[1], AlignCells);
+      TMarkDownBlockParser.SplitTableRow(SourceLines[1], AlignCells);
       SetLength(ColWidths, ColCount);
       SetLength(RowHeights, Rows.Count);
       SetLength(Aligns, ColCount);
@@ -2037,9 +1973,13 @@ begin
           TokenHeight := DrawInline(Tokens, TextLeft + 13, Y, ContentWidth - 13, True,
             [], 0, taLeftJustify, '> ');
           R := Rect(TextLeft, Y + 2, TextLeft + 4, Y + TokenHeight);
-          Canvas.Brush.Color := FQuoteBarColor;
-          Canvas.FillRect(R);
-          Canvas.Brush.Color := Color;
+          CanvasState := TCanvasState.Save(Canvas);
+          try
+            Canvas.Brush.Color := FQuoteBarColor;
+            Canvas.FillRect(R);
+          finally
+            CanvasState.Restore;
+          end;
           Inc(Y, TokenHeight + ParagraphSpacing);
         end;
       bkListItem:
@@ -2049,7 +1989,7 @@ begin
           TextIndent := 22;
           if Block.IsTask then
           begin
-            MarkerLeft := ListLeft + Max(0, (TextIndent - 15) div 2);
+            MarkerLeft := CenterMarkerLeft(ListLeft, TextIndent, 15);
             CheckRect := Rect(MarkerLeft, Y + 3, MarkerLeft + 15, Y + 18);
             if Block.TaskChecked then
               DrawFrameControl(Canvas.Handle, CheckRect, DFC_BUTTON, DFCS_BUTTONCHECK or DFCS_CHECKED)
@@ -2061,13 +2001,15 @@ begin
             if Block.Ordered then
             begin
               Bullet := IntToStr(Block.Number) + '.';
-              MarkerLeft := ListLeft + Max(0, (TextIndent - Canvas.TextWidth(Bullet)) div 2);
+              MarkerLeft := CenterMarkerLeft(ListLeft, TextIndent,
+                Canvas.TextWidth(Bullet));
               Canvas.TextOut(MarkerLeft, Y, Bullet);
             end
             else
             begin
               Bullet := #$25CF;
-              MarkerLeft := ListLeft + Max(0, (TextIndent - Canvas.TextWidth(Bullet)) div 2);
+              MarkerLeft := CenterMarkerLeft(ListLeft, TextIndent,
+                Canvas.TextWidth(Bullet));
               Canvas.TextOut(MarkerLeft, Y, Bullet);
             end;
           end;

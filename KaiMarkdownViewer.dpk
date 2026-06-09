@@ -33,6 +33,9 @@ requires
   vclimg;
 
 contains
-  MarkdownViewerVCL in 'MarkdownViewerVCL.pas';
+  MarkdownViewerVCL in 'MarkdownViewerVCL.pas',
+  MarkdownViewer.Model in 'MarkdownViewer.Model.pas',
+  MarkdownViewer.Parser in 'MarkdownViewer.Parser.pas',
+  MarkdownViewer.Renderer in 'MarkdownViewer.Renderer.pas';
 
 end.

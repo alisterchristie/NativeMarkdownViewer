@@ -1,6 +1,7 @@
 # RAD Studio / Delphi local state
 *.local
 *.identcache
+*.delphilsp.json
 *.stat
 *.tvsconfig
 *.dsk

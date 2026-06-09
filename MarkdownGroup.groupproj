@@ -9,6 +9,9 @@
         <Projects Include="TestApp\MarkdownViewerDemo.dproj">
             <Dependencies/>
         </Projects>
+        <Projects Include="DUnitX\MarkdownViewerTests.dproj">
+            <Dependencies/>
+        </Projects>
     </ItemGroup>
     <ProjectExtensions>
         <Borland.Personality>Default.Personality.12</Borland.Personality>
@@ -35,14 +38,23 @@
     <Target Name="MarkdownViewerDemo:Make">
         <MSBuild Projects="TestApp\MarkdownViewerDemo.dproj" Targets="Make"/>
     </Target>
+    <Target Name="MarkdownViewerTests">
+        <MSBuild Projects="DUnitX\MarkdownViewerTests.dproj"/>
+    </Target>
+    <Target Name="MarkdownViewerTests:Clean">
+        <MSBuild Projects="DUnitX\MarkdownViewerTests.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="MarkdownViewerTests:Make">
+        <MSBuild Projects="DUnitX\MarkdownViewerTests.dproj" Targets="Make"/>
+    </Target>
     <Target Name="Build">
-        <CallTarget Targets="KaiMarkdownViewer;MarkdownViewerDemo"/>
+        <CallTarget Targets="KaiMarkdownViewer;MarkdownViewerDemo;MarkdownViewerTests"/>
     </Target>
     <Target Name="Clean">
-        <CallTarget Targets="KaiMarkdownViewer:Clean;MarkdownViewerDemo:Clean"/>
+        <CallTarget Targets="KaiMarkdownViewer:Clean;MarkdownViewerDemo:Clean;MarkdownViewerTests:Clean"/>
     </Target>
     <Target Name="Make">
-        <CallTarget Targets="KaiMarkdownViewer:Make;MarkdownViewerDemo:Make"/>
+        <CallTarget Targets="KaiMarkdownViewer:Make;MarkdownViewerDemo:Make;MarkdownViewerTests:Make"/>
     </Target>
     <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
 </Project>

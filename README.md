@@ -210,6 +210,17 @@ cd TestApp
 MSBuild MarkdownViewerDemo.dproj /t:Build /p:Config=Debug /p:Platform=Win32
 ```
 
+## Tests
+
+The `DUnitX/MarkdownViewerTests.dproj` console project contains focused tests
+for the model, parser, renderer helpers, and VCL component. It is included in
+`MarkdownGroup.groupproj`.
+
+```bat
+MSBuild DUnitX\MarkdownViewerTests.dproj /t:Build /p:Config=Debug /p:Platform=Win32
+DUnitX\Win32\Debug\MarkdownViewerTests.exe --exitbehavior:Continue
+```
+
 ## Notes
 
 This is a lightweight native markdown renderer, not a full CommonMark implementation. It is intended for typical application help, notes, preview panes, and embedded documentation where native VCL rendering and simple deployment are more important than exhaustive markdown compatibility.

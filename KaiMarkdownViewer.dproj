@@ -128,6 +128,9 @@
         <DCCReference Include="vcl.dcp"/>
         <DCCReference Include="vclimg.dcp"/>
         <DCCReference Include="MarkdownViewerVCL.pas"/>
+        <DCCReference Include="MarkdownViewer.Model.pas"/>
+        <DCCReference Include="MarkdownViewer.Parser.pas"/>
+        <DCCReference Include="MarkdownViewer.Renderer.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>
