@@ -16,6 +16,16 @@ type
 
   TMarkDownBlockKind = (bkParagraph, bkHeading, bkQuote, bkListItem, bkCodeBlock, bkRule, bkTable, bkImage);
 
+  TMarkDownInlineKind = (ikText, ikBold, ikItalic, ikBoldItalic, ikCode, ikLink, ikStrike);
+
+  TMarkDownInlineToken = record
+    Kind: TMarkDownInlineKind;
+    Text: string;
+    Url: string;
+  end;
+
+  TMarkDownInlineList = TList<TMarkDownInlineToken>;
+
   TMarkDownBlock = class
   public
     Kind: TMarkDownBlockKind;
@@ -28,6 +38,12 @@ type
     IsTask: Boolean;
     TaskChecked: Boolean;
     SourceStartLine: Integer;
+    InlineTokens: TMarkDownInlineList;
+    LayoutTop: Integer;
+    LayoutHeight: Integer;
+    LayoutWidth: Integer;
+    constructor Create;
+    destructor Destroy; override;
   end;
 
   TMarkDownLinkHit = record
@@ -88,7 +104,9 @@ type
     function HitTestTextPosition(X, Y: Integer): Integer;
     function IsMarkdownStored: Boolean;
     procedure ClearSelection;
+    procedure ClearInlineTokenCaches;
     procedure CopySelectionToClipboard(PlainText: Boolean);
+    procedure InvalidateLayout;
     procedure MarkdownChanged(Sender: TObject);
     procedure SelectAllText;
     procedure SetBasePath(const Value: string);
@@ -172,17 +190,6 @@ uses
 const
   MarkdownPadding = 14;
   ParagraphSpacing = 9;
-
-type
-  TMarkDownInlineKind = (ikText, ikBold, ikItalic, ikBoldItalic, ikCode, ikLink, ikStrike);
-
-  TMarkDownInlineToken = record
-    Kind: TMarkDownInlineKind;
-    Text: string;
-    Url: string;
-  end;
-
-  TMarkDownInlineList = TList<TMarkDownInlineToken>;
 
 function TrimLeftOnly(const S: string): string;
 var
@@ -451,6 +458,19 @@ begin
   Result.IsTask := False;
   Result.TaskChecked := False;
   Result.SourceStartLine := SourceStartLine;
+end;
+
+constructor TMarkDownBlock.Create;
+begin
+  inherited Create;
+  LayoutHeight := -1;
+  LayoutWidth := -1;
+end;
+
+destructor TMarkDownBlock.Destroy;
+begin
+  InlineTokens.Free;
+  inherited Destroy;
 end;
 
 function ParseBlocks(Lines: TStrings; StartLine: Integer = 0): TMarkDownBlockList;
@@ -906,7 +926,27 @@ end;
 procedure TMarkDownViewer.CMFontChanged(var Message: TMessage);
 begin
   inherited;
+  InvalidateLayout;
   Invalidate;
+end;
+
+procedure TMarkDownViewer.ClearInlineTokenCaches;
+var
+  Block: TMarkDownBlock;
+begin
+  for Block in FBlocks do
+    FreeAndNil(Block.InlineTokens);
+end;
+
+procedure TMarkDownViewer.InvalidateLayout;
+var
+  Block: TMarkDownBlock;
+begin
+  for Block in FBlocks do
+  begin
+    Block.LayoutHeight := -1;
+    Block.LayoutWidth := -1;
+  end;
 end;
 
 procedure TMarkDownViewer.KeyDown(var Key: Word; Shift: TShiftState);
@@ -1107,6 +1147,7 @@ var
   SegmentStart: Integer;
   StartIndex: Integer;
   UpdateRect: TRect;
+  OldReferences: string;
 begin
   if Value = '' then
     Exit;
@@ -1153,7 +1194,10 @@ begin
     FUpdatingMarkdown := False;
   end;
 
+  OldReferences := FLinkReferences.Text;
   ExtractLinkReferences(FMarkdown, FLinkReferences);
+  if FLinkReferences.Text <> OldReferences then
+    ClearInlineTokenCaches;
   while (FBlocks.Count > 0) and (FBlocks.Last.SourceStartLine >= ReparseLine) do
     FBlocks.Delete(FBlocks.Count - 1);
 
@@ -1313,6 +1357,13 @@ var
   TextIndent: Integer;
   LineTextStart: Integer;
   OldBkMode: Integer;
+
+  function InlineTokensForBlock(ABlock: TMarkDownBlock): TMarkDownInlineList;
+  begin
+    if ABlock.InlineTokens = nil then
+      ABlock.InlineTokens := ParseInline(ABlock.Text, FLinkReferences);
+    Result := ABlock.InlineTokens;
+  end;
 
   function SelectionRange(out SelStart, SelEnd: Integer): Boolean;
   begin
@@ -1968,28 +2019,21 @@ begin
     if I = Blocks.Count - 1 then
       FLastBlockTop := Y;
     Block := Blocks[I];
+    Block.LayoutTop := Y + FScrollPos;
     case Block.Kind of
       bkHeading:
         begin
           AssignBaseFont([fsBold], Max(1, 8 - (Block.Level * 2)));
-          Tokens := ParseInline(Block.Text, FLinkReferences);
-          try
-            TokenHeight := DrawInline(Tokens, TextLeft, Y, ContentWidth, True, [fsBold],
-              Max(1, 8 - (Block.Level * 2)), taLeftJustify, StringOfChar('#', Block.Level) + ' ');
-          finally
-            Tokens.Free;
-          end;
+          Tokens := InlineTokensForBlock(Block);
+          TokenHeight := DrawInline(Tokens, TextLeft, Y, ContentWidth, True, [fsBold],
+            Max(1, 8 - (Block.Level * 2)), taLeftJustify, StringOfChar('#', Block.Level) + ' ');
           Inc(Y, TokenHeight + ParagraphSpacing + 2);
         end;
       bkQuote:
         begin
-          Tokens := ParseInline(Block.Text, FLinkReferences);
-          try
-            TokenHeight := DrawInline(Tokens, TextLeft + 13, Y, ContentWidth - 13, True,
-              [], 0, taLeftJustify, '> ');
-          finally
-            Tokens.Free;
-          end;
+          Tokens := InlineTokensForBlock(Block);
+          TokenHeight := DrawInline(Tokens, TextLeft + 13, Y, ContentWidth - 13, True,
+            [], 0, taLeftJustify, '> ');
           R := Rect(TextLeft, Y + 2, TextLeft + 4, Y + TokenHeight);
           Canvas.Brush.Color := FQuoteBarColor;
           Canvas.FillRect(R);
@@ -2029,14 +2073,10 @@ begin
           else
             ListMarker := '- ';
 
-          Tokens := ParseInline(Block.Text, FLinkReferences);
-          try
-            TokenHeight := DrawInline(Tokens, ListLeft + TextIndent, Y,
-              Max(10, ContentWidth - (ListLeft - TextLeft) - TextIndent), True,
-              [], 0, taLeftJustify, StringOfChar(' ', Max(0, Block.IndentLevel) * 2) + ListMarker);
-          finally
-            Tokens.Free;
-          end;
+          Tokens := InlineTokensForBlock(Block);
+          TokenHeight := DrawInline(Tokens, ListLeft + TextIndent, Y,
+            Max(10, ContentWidth - (ListLeft - TextLeft) - TextIndent), True,
+            [], 0, taLeftJustify, StringOfChar(' ', Max(0, Block.IndentLevel) * 2) + ListMarker);
           Inc(Y, TokenHeight + 3);
         end;
       bkImage:
@@ -2095,14 +2135,12 @@ begin
           Inc(Y, 18);
         end;
     else
-      Tokens := ParseInline(Block.Text, FLinkReferences);
-      try
-        TokenHeight := DrawInline(Tokens, TextLeft, Y, ContentWidth, True);
-      finally
-        Tokens.Free;
-      end;
+      Tokens := InlineTokensForBlock(Block);
+      TokenHeight := DrawInline(Tokens, TextLeft, Y, ContentWidth, True);
       Inc(Y, TokenHeight + ParagraphSpacing);
     end;
+    Block.LayoutHeight := Y + FScrollPos - Block.LayoutTop;
+    Block.LayoutWidth := ContentWidth;
     AddSelectableBreak;
   end;
 
@@ -2117,6 +2155,7 @@ end;
 procedure TMarkDownViewer.Resize;
 begin
   inherited;
+  InvalidateLayout;
   UpdateScrollBar;
   Invalidate;
 end;
