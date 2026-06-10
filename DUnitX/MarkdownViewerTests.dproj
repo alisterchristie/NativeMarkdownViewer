@@ -67,6 +67,10 @@
         <DCCReference Include="Test.MarkdownViewer.Parser.pas"/>
         <DCCReference Include="Test.MarkdownViewer.Renderer.pas"/>
         <DCCReference Include="Test.MarkdownViewerVCL.pas"/>
+        <DCCReference Include="Test.Demo.MainForm.pas"/>
+        <DCCReference Include="..\TestApp\Demo.MainForm.pas">
+            <Form>MainForm</Form>
+        </DCCReference>
         <DCCReference Include="..\MarkdownViewer.Model.pas"/>
         <DCCReference Include="..\MarkdownViewer.Parser.pas"/>
         <DCCReference Include="..\MarkdownViewer.Renderer.pas"/>

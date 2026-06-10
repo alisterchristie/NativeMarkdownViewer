@@ -39,8 +39,10 @@ type
     FAppendEndedWithCR: Boolean;
     FUpdatingMarkdown: Boolean;
     FOnLinkClick: TMarkDownLinkClickEvent;
+    FOnScroll: TNotifyEvent;
     function GetMarkdown: TStrings;
     function GetMarkdownText: string;
+    function GetMaxScrollPosition: Integer;
     function HasSelection: Boolean;
     function HitTestTextPosition(X, Y: Integer): Integer;
     function IsMarkdownStored: Boolean;
@@ -77,8 +79,12 @@ type
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
     procedure AppendMarkdownText(const Value: string);
+    procedure CopySelection(PlainText: Boolean = False);
     procedure LoadFromFile(const FileName: string);
+    procedure SelectAll;
     property MarkdownText: string read GetMarkdownText write SetMarkdownText;
+    property MaxScrollPosition: Integer read GetMaxScrollPosition;
+    property ScrollPosition: Integer read FScrollPos write SetScrollPosition;
   published
     property Align;
     property Anchors;
@@ -112,6 +118,7 @@ type
     property OnMouseMove;
     property OnMouseUp;
     property OnResize;
+    property OnScroll: TNotifyEvent read FOnScroll write FOnScroll;
   end;
 
 procedure Register;
@@ -946,6 +953,11 @@ begin
   Result := FMarkdown;
 end;
 
+function TMarkDownViewer.GetMaxScrollPosition: Integer;
+begin
+  Result := Max(0, FContentHeight - ClientHeight);
+end;
+
 function TMarkDownViewer.HasSelection: Boolean;
 begin
   Result := FSelectionAnchor <> FSelectionCaret;
@@ -1072,6 +1084,11 @@ begin
   end;
 
   Clipboard.AsText := MarkdownSelection;
+end;
+
+procedure TMarkDownViewer.CopySelection(PlainText: Boolean);
+begin
+  CopySelectionToClipboard(PlainText);
 end;
 
 procedure TMarkDownViewer.AppendMarkdownText(const Value: string);
@@ -2123,6 +2140,11 @@ begin
   Invalidate;
 end;
 
+procedure TMarkDownViewer.SelectAll;
+begin
+  SelectAllText;
+end;
+
 procedure TMarkDownViewer.SetCodeBackgroundColor(const Value: TColor);
 begin
   if FCodeBackgroundColor <> Value then
@@ -2191,12 +2213,14 @@ procedure TMarkDownViewer.SetScrollPosition(const Value: Integer);
 var
   NewPosition: Integer;
 begin
-  NewPosition := EnsureRange(Value, 0, Max(0, FContentHeight - ClientHeight));
+  NewPosition := EnsureRange(Value, 0, MaxScrollPosition);
   if FScrollPos <> NewPosition then
   begin
     FScrollPos := NewPosition;
     UpdateScrollBar;
     Invalidate;
+    if Assigned(FOnScroll) then
+      FOnScroll(Self);
   end;
 end;
 

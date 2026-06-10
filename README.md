@@ -179,6 +179,10 @@ TestApp/MarkdownViewerDemo.dproj
 
 The demo creates `TMarkDownViewer` at runtime, so the package does not need to be installed into the IDE to try the component.
 
+The main demo also provides file open/save/reload commands, unsaved-change
+prompts, editor clipboard commands, search highlighting, editor visibility and
+word-wrap controls, and adjustable preview/editor font sizes.
+
 ## Keyboard Navigation
 
 When the viewer has focus, it supports:
