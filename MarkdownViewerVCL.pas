@@ -68,6 +68,7 @@ type
     procedure MoveCaretPage(Direction: Integer; ExtendSelection: Boolean);
     procedure MoveCaretVertical(Direction: Integer; ExtendSelection: Boolean);
     procedure MoveCaretDocumentBoundary(ToEnd, ExtendSelection: Boolean);
+    procedure ScrollCaretIntoView;
     procedure SelectAllText;
     procedure SetBasePath(const Value: string);
     procedure SetCodeBackgroundColor(const Value: TColor);
@@ -347,6 +348,16 @@ begin
   Token.Text := Text;
   Token.Url := Url;
   Tokens.Add(Token);
+end;
+
+function IsWhitespaceText(const S: string): Boolean;
+var
+  I: Integer;
+begin
+  Result := S <> '';
+  for I := 1 to Length(S) do
+    if not CharInSet(S[I], [' ', #9, #13, #10]) then
+      Exit(False);
 end;
 
 function IsEscapedAt(const Text: string; Index: Integer): Boolean;
@@ -1031,12 +1042,20 @@ begin
     if FSelectionCaret = 0 then
       Exit;
     FSelectionAnchor := FSelectionCaret - 1;
+    if (FSelectionCaret >= 2) and
+      (FSelectableText[FSelectionCaret] = #10) and
+      (FSelectableText[FSelectionCaret - 1] = #13) then
+      FSelectionAnchor := FSelectionCaret - 2;
   end
   else
   begin
     if FSelectionCaret >= Length(FSelectableText) then
       Exit;
     FSelectionAnchor := FSelectionCaret + 1;
+    if (FSelectionCaret + 2 <= Length(FSelectableText)) and
+      (FSelectableText[FSelectionCaret + 1] = #13) and
+      (FSelectableText[FSelectionCaret + 2] = #10) then
+      FSelectionAnchor := FSelectionCaret + 2;
   end;
   InsertTextAtSelection('');
 end;
@@ -1083,6 +1102,7 @@ begin
   FSelectionCaret := SourceToSelectablePosition(NewSourceCaret);
   FSelectionAnchor := FSelectionCaret;
   FDesiredCaretX := -1;
+  ScrollCaretIntoView;
   Invalidate;
 end;
 
@@ -1103,10 +1123,21 @@ begin
     NewPosition := EnsureRange(FSelectionCaret + Delta, 0,
       Length(FSelectableText));
 
+  if (NewPosition > 0) and (NewPosition < Length(FSelectableText)) and
+    (FSelectableText[NewPosition] = #13) and
+    (FSelectableText[NewPosition + 1] = #10) then
+  begin
+    if Delta < 0 then
+      Dec(NewPosition)
+    else
+      Inc(NewPosition);
+  end;
+
   FSelectionCaret := NewPosition;
   if not ExtendSelection then
     FSelectionAnchor := NewPosition;
   FDesiredCaretX := -1;
+  ScrollCaretIntoView;
   Invalidate;
 end;
 
@@ -1634,6 +1665,28 @@ var
     Result := -1;
     if AText = '' then
       Exit;
+
+    // Rendered whitespace rarely matches the source exactly: paragraph
+    // lines are joined with a space where the source has a line break,
+    // and syntax such as '**' sits between words. Match any whitespace
+    // run instead of searching for the literal text, otherwise the scan
+    // position jumps into a later line and derails every atom after it.
+    if IsWhitespaceText(AText) then
+    begin
+      FoundAt := SourceScanPosition;
+      while (FoundAt <= Length(SourceText)) and
+        not CharInSet(SourceText[FoundAt], [' ', #9, #13, #10]) do
+        Inc(FoundAt);
+      if FoundAt > Length(SourceText) then
+        Exit;
+      Result := FoundAt - 1;
+      while (FoundAt <= Length(SourceText)) and
+        CharInSet(SourceText[FoundAt], [' ', #9, #13, #10]) do
+        Inc(FoundAt);
+      SourceScanPosition := FoundAt;
+      Exit;
+    end;
+
     FoundAt := PosEx(AText, SourceText, SourceScanPosition);
     if FoundAt = 0 then
       Exit;
@@ -1684,8 +1737,10 @@ var
     AddCopyChunk(Result, Run.SourceStartIndex, AText, AMarkdownText);
   end;
 
-  procedure AddSelectableText(const AText: string; const AMarkdownText: string = '');
+  procedure AddSelectableText(const AText: string; const AMarkdownText: string = '';
+    AHasSource: Boolean = True);
   var
+    SourceStart: Integer;
     TextStart: Integer;
   begin
     if AText = '' then
@@ -1693,15 +1748,22 @@ var
 
     TextStart := Length(FSelectableText);
     FSelectableText := FSelectableText + AText;
-    AddCopyChunk(TextStart, FindSourceStart(AText), AText, AMarkdownText);
+    if AHasSource then
+      SourceStart := FindSourceStart(AText)
+    else
+      SourceStart := -1;
+    AddCopyChunk(TextStart, SourceStart, AText, AMarkdownText);
   end;
 
-  procedure AddSelectableBreak;
+  // AHasSource=False marks breaks that exist only in the rendered layout
+  // (word wrap, table cell separators); they must not consume source text
+  // or the caret-to-source mapping derails for everything that follows.
+  procedure AddSelectableBreak(AHasSource: Boolean = True);
   begin
     if FSelectableText = '' then
       Exit;
     if not EndsText(sLineBreak, FSelectableText) then
-      AddSelectableText(sLineBreak);
+      AddSelectableText(sLineBreak, '', AHasSource);
   end;
 
   procedure DrawCaret;
@@ -2008,7 +2070,7 @@ var
         if (Trim(Atom) <> '') and (LineUsed > 0) and (LineUsed + AtomWidth > AWidth) then
         begin
           if ADraw then
-            AddSelectableBreak;
+            AddSelectableBreak(False);
           Inc(YPos, LineHeight);
           LineUsed := 0;
           X := AlignedX(TokenIndex, AtomStart);
@@ -2267,7 +2329,7 @@ var
             CellTokens.Free;
           end;
           if Col < ColCount - 1 then
-            AddSelectableText(#9);
+            AddSelectableText(#9, '', False);
           Inc(X, ColWidths[Col]);
         end;
         AddSelectableBreak;
@@ -2459,6 +2521,28 @@ begin
   InvalidateLayout;
   UpdateScrollBar;
   Invalidate;
+end;
+
+procedure TMarkDownViewer.ScrollCaretIntoView;
+var
+  I: Integer;
+  Run: TMarkDownTextRun;
+begin
+  if FTextRuns.Count = 0 then
+    Exit;
+
+  Run := FTextRuns.Last;
+  for I := 0 to FTextRuns.Count - 1 do
+  begin
+    Run := FTextRuns[I];
+    if FSelectionCaret <= Run.StartIndex + Length(Run.Text) then
+      Break;
+  end;
+
+  if Run.Rect.Top < 0 then
+    SetScrollPosition(FScrollPos + Run.Rect.Top - MarkdownPadding)
+  else if Run.Rect.Bottom > ClientHeight then
+    SetScrollPosition(FScrollPos + Run.Rect.Bottom - ClientHeight + MarkdownPadding);
 end;
 
 procedure TMarkDownViewer.SelectAllText;

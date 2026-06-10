@@ -32,6 +32,14 @@ type
     procedure DirectEditingSupportsPageNavigation;
     [Test]
     procedure DirectEditingSupportsControlHomeAndEnd;
+    [Test]
+    procedure DirectEditingInsertsInsideWrappedParagraph;
+    [Test]
+    procedure DirectEditingInsertsInsideMultiLineParagraph;
+    [Test]
+    procedure DirectEditingBackspaceJoinsBlocks;
+    [Test]
+    procedure DirectEditingArrowSkipsLineBreakPair;
   end;
 
 implementation
@@ -242,6 +250,120 @@ begin
   end;
 end;
 
+procedure TMarkDownViewerTests.DirectEditingInsertsInsideWrappedParagraph;
+var
+  Form: TForm;
+  Text: string;
+  Viewer: TTestMarkDownViewer;
+begin
+  Form := TForm.Create(nil);
+  try
+    Viewer := TTestMarkDownViewer.Create(Form);
+    Viewer.Parent := Form;
+    Viewer.SetBounds(0, 0, 160, 300);
+    Viewer.ReadOnly := False;
+    Viewer.MarkdownText :=
+      'alpha bravo charlie delta echo foxtrot golf hotel india juliet';
+    Form.Show;
+    Application.ProcessMessages;
+    Viewer.Repaint;
+
+    Viewer.PressKey(VK_DOWN);
+    Viewer.PressKey(VK_END);
+    Viewer.TypeCharacter('X');
+
+    Text := Viewer.MarkdownText;
+    Assert.IsTrue(Pos('X', Text) > 0, Text);
+    Assert.IsTrue(Pos('X', Text) < Pos('juliet', Text), Text);
+  finally
+    Form.Free;
+  end;
+end;
+
+procedure TMarkDownViewerTests.DirectEditingInsertsInsideMultiLineParagraph;
+var
+  Form: TForm;
+  I: Integer;
+  Viewer: TTestMarkDownViewer;
+begin
+  Form := TForm.Create(nil);
+  try
+    Viewer := TTestMarkDownViewer.Create(Form);
+    Viewer.Parent := Form;
+    Viewer.SetBounds(0, 0, 400, 300);
+    Viewer.ReadOnly := False;
+    Viewer.Markdown.Add('alpha bravo');
+    Viewer.Markdown.Add('charlie delta');
+    Form.Show;
+    Application.ProcessMessages;
+    Viewer.Repaint;
+
+    for I := 1 to 14 do
+      Viewer.PressKey(VK_RIGHT);
+    Viewer.TypeCharacter('X');
+
+    Assert.IsTrue(Viewer.MarkdownText.Contains('chXarlie'),
+      Viewer.MarkdownText);
+  finally
+    Form.Free;
+  end;
+end;
+
+procedure TMarkDownViewerTests.DirectEditingBackspaceJoinsBlocks;
+var
+  Form: TForm;
+  Viewer: TTestMarkDownViewer;
+begin
+  Form := TForm.Create(nil);
+  try
+    Viewer := TTestMarkDownViewer.Create(Form);
+    Viewer.Parent := Form;
+    Viewer.SetBounds(0, 0, 400, 300);
+    Viewer.ReadOnly := False;
+    Viewer.MarkdownText := '# alpha' + sLineBreak + sLineBreak + '# bravo';
+    Form.Show;
+    Application.ProcessMessages;
+    Viewer.Repaint;
+
+    Viewer.PressKey(VK_DOWN);
+    Viewer.PressKey(VK_BACK);
+
+    Assert.IsFalse(Viewer.MarkdownText.Contains(sLineBreak + sLineBreak),
+      Viewer.MarkdownText);
+    Assert.IsTrue(Viewer.MarkdownText.StartsWith('# alphabravo'),
+      Viewer.MarkdownText);
+  finally
+    Form.Free;
+  end;
+end;
+
+procedure TMarkDownViewerTests.DirectEditingArrowSkipsLineBreakPair;
+var
+  Form: TForm;
+  Viewer: TTestMarkDownViewer;
+begin
+  Form := TForm.Create(nil);
+  try
+    Viewer := TTestMarkDownViewer.Create(Form);
+    Viewer.Parent := Form;
+    Viewer.SetBounds(0, 0, 400, 300);
+    Viewer.ReadOnly := False;
+    Viewer.MarkdownText := '# alpha' + sLineBreak + sLineBreak + '# bravo';
+    Form.Show;
+    Application.ProcessMessages;
+    Viewer.Repaint;
+
+    Viewer.PressKey(VK_END);
+    Viewer.PressKey(VK_RIGHT);
+    Viewer.TypeCharacter('X');
+
+    Assert.IsTrue(Viewer.MarkdownText.Contains('# Xbravo'),
+      Viewer.MarkdownText);
+  finally
+    Form.Free;
+  end;
+end;
+
 procedure TMarkDownViewerTests.HandleViewerChange(Sender: TObject);
 begin
   Inc(FChangeCount);
@@ -289,9 +411,11 @@ begin
     Application.ProcessMessages;
     Viewer.Repaint;
 
-    Viewer.ScrollPosition := Viewer.MaxScrollPosition div 2;
+    for I := 1 to 30 do
+      Viewer.PressKey(VK_DOWN);
     SavedScrollPos := Viewer.ScrollPosition;
-    Assert.IsTrue(SavedScrollPos > 0, 'expected a scrollable document');
+    Assert.IsTrue(SavedScrollPos > 0,
+      'expected caret movement to scroll the view');
 
     Viewer.TypeCharacter('X');
     Assert.AreEqual(SavedScrollPos, Viewer.ScrollPosition);
