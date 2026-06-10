@@ -61,6 +61,7 @@ type
     procedure EditorChanged(Sender: TObject);
     procedure ExitClick(Sender: TObject);
     procedure FindChanged(Sender: TObject);
+    procedure FormClose(Sender: TObject; var Action: TCloseAction);
     procedure FormCloseQuery(Sender: TObject; var CanClose: Boolean);
     procedure FormCreate(Sender: TObject);
     procedure IncreaseFontClick(Sender: TObject);
@@ -75,6 +76,7 @@ type
     procedure SaveClick(Sender: TObject);
     procedure SelectAllClick(Sender: TObject);
     procedure ShowEditorClick(Sender: TObject);
+    procedure SyncEditorToViewer(Sender: TObject);
     procedure UndoClick(Sender: TObject);
     procedure WordWrapClick(Sender: TObject);
   private
@@ -90,9 +92,9 @@ type
     procedure SetDocumentText(const Text, FileName: string);
     procedure SetModified(Value: Boolean);
     function SaveDocument(const FileName: string): Boolean;
-    procedure SyncEditorToViewer(Sender: TObject);
     procedure SyncViewerToEditor;
     procedure UpdateInterface;
+    procedure UpdateStatusBar;
   protected
     procedure CreateParams(var Params: TCreateParams); override;
   public
@@ -106,6 +108,7 @@ uses
   System.StrUtils,
   System.SysUtils,
   System.UITypes,
+  Winapi.ShellAPI,
   Winapi.Windows;
 
 {$R *.dfm}
@@ -217,22 +220,18 @@ begin
   if (Message.Msg = WM_VSCROLL) or (Message.Msg = WM_MOUSEWHEEL) or
     (Message.Msg = WM_KEYDOWN) then
     SyncViewerToEditor;
+  if (Message.Msg = WM_KEYDOWN) or (Message.Msg = WM_LBUTTONUP) then
+    UpdateStatusBar;
 end;
 
 procedure TMainForm.FindChanged(Sender: TObject);
 begin
   Viewer.SearchText := FindEdit.Text;
+  UpdateStatusBar;
 end;
 
 procedure TMainForm.FormCreate(Sender: TObject);
 begin
-  Viewer := TMarkDownViewer.Create(Self);
-  Viewer.Parent := Self;
-  Viewer.Align := alClient;
-  Viewer.OnLinkClick := LinkClicked;
-  Viewer.OnScroll := SyncEditorToViewer;
-  Viewer.TabOrder := 1;
-
   FEditorWindowProc := Editor.WindowProc;
   Editor.WindowProc := EditorWindowProc;
   OpenDialog.Filter := 'Markdown files|*.md;*.markdown;*.mdown|Text files|*.txt|All files|*.*';
@@ -268,7 +267,9 @@ end;
 
 procedure TMainForm.LinkClicked(Sender: TObject; const Url: string);
 begin
-  ShowMessage(Url);
+  if ShellExecute(Handle, 'open', PChar(Url), nil, nil, SW_SHOWNORMAL) <= 32 then
+    MessageDlg('Unable to open the link:' + sLineBreak + Url,
+      mtError, [mbOK], 0);
 end;
 
 procedure TMainForm.ClearFindClick(Sender: TObject);
@@ -294,7 +295,9 @@ end;
 
 procedure TMainForm.CopyClick(Sender: TObject);
 begin
-  if Editor.Focused then
+  if FindEdit.Focused then
+    FindEdit.CopyToClipboard
+  else if Editor.Focused then
     Editor.CopyToClipboard
   else
     Viewer.CopySelection;
@@ -302,7 +305,9 @@ end;
 
 procedure TMainForm.CutClick(Sender: TObject);
 begin
-  if Editor.CanFocus then
+  if FindEdit.Focused then
+    FindEdit.CutToClipboard
+  else if Editor.CanFocus then
   begin
     Editor.SetFocus;
     Editor.CutToClipboard;
@@ -318,6 +323,11 @@ end;
 procedure TMainForm.ExitClick(Sender: TObject);
 begin
   Close;
+end;
+
+procedure TMainForm.FormClose(Sender: TObject; var Action: TCloseAction);
+begin
+  Action := caFree;
 end;
 
 procedure TMainForm.FormCloseQuery(Sender: TObject; var CanClose: Boolean);
@@ -337,6 +347,7 @@ var
 begin
   Lines := TStringList.Create;
   try
+    Lines.DefaultEncoding := TEncoding.UTF8;
     try
       Lines.LoadFromFile(FileName);
       SetDocumentText(Lines.Text, ExpandFileName(FileName));
@@ -370,7 +381,9 @@ end;
 
 procedure TMainForm.PasteClick(Sender: TObject);
 begin
-  if Editor.CanFocus then
+  if FindEdit.Focused then
+    FindEdit.PasteFromClipboard
+  else if Editor.CanFocus then
   begin
     Editor.SetFocus;
     Editor.PasteFromClipboard;
@@ -430,7 +443,9 @@ end;
 
 procedure TMainForm.SelectAllClick(Sender: TObject);
 begin
-  if Viewer.Focused then
+  if FindEdit.Focused then
+    FindEdit.SelectAll
+  else if Viewer.Focused then
     Viewer.SelectAll
   else if Editor.CanFocus then
   begin
@@ -516,7 +531,9 @@ end;
 
 procedure TMainForm.UndoClick(Sender: TObject);
 begin
-  if Editor.CanFocus then
+  if FindEdit.Focused then
+    FindEdit.Undo
+  else if Editor.CanFocus then
   begin
     Editor.SetFocus;
     Editor.Undo;
@@ -535,12 +552,49 @@ begin
     DisplayName := DisplayName + ' *';
 
   Caption := DisplayName + ' - TMarkDownViewer Demo';
-  StatusBar.SimpleText := IfThen(FCurrentFileName = '', 'Sample/unsaved document',
-    FCurrentFileName);
+  UpdateStatusBar;
   SaveMenuItem.Enabled := FModified;
   SaveButton.Enabled := FModified;
   ReloadMenuItem.Enabled := FCurrentFileName <> '';
   ReloadButton.Enabled := ReloadMenuItem.Enabled;
+end;
+
+procedure TMainForm.UpdateStatusBar;
+var
+  ColumnNumber: Integer;
+  DocumentName: string;
+  LineNumber: Integer;
+  MatchCount: Integer;
+  MatchPosition: Integer;
+  SearchSource: string;
+  SearchValue: string;
+begin
+  if FCurrentFileName = '' then
+    DocumentName := 'Sample/unsaved document'
+  else
+    DocumentName := FCurrentFileName;
+
+  LineNumber := Editor.Perform(EM_LINEFROMCHAR, Editor.SelStart, 0);
+  ColumnNumber := Editor.SelStart -
+    Editor.Perform(EM_LINEINDEX, LineNumber, 0);
+
+  MatchCount := 0;
+  SearchValue := LowerCase(FindEdit.Text);
+  if SearchValue <> '' then
+  begin
+    SearchSource := LowerCase(Editor.Text);
+    MatchPosition := PosEx(SearchValue, SearchSource, 1);
+    while MatchPosition > 0 do
+    begin
+      Inc(MatchCount);
+      MatchPosition := PosEx(SearchValue, SearchSource,
+        MatchPosition + Length(SearchValue));
+    end;
+  end;
+
+  StatusBar.SimpleText := Format('%s | Ln %d, Col %d | %d match%s',
+    [DocumentName, LineNumber + 1, ColumnNumber + 1, MatchCount,
+    IfThen(MatchCount = 1, '', 'es')]);
 end;
 
 procedure TMainForm.WordWrapClick(Sender: TObject);

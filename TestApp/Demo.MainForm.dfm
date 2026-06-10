@@ -11,10 +11,17 @@ object MainForm: TMainForm
   Font.Name = 'Segoe UI'
   Font.Style = []
   Menu = MainMenu
+  Position = poScreenCenter
+  OnClose = FormClose
   OnCloseQuery = FormCloseQuery
   OnCreate = FormCreate
-  Position = poScreenCenter
   TextHeight = 15
+  object Splitter: TSplitter
+    Left = 390
+    Top = 34
+    Width = 6
+    Height = 585
+  end
   object Editor: TMemo
     Left = 0
     Top = 34
@@ -26,12 +33,6 @@ object MainForm: TMainForm
     WordWrap = False
     OnChange = EditorChanged
   end
-  object Splitter: TSplitter
-    Left = 390
-    Top = 34
-    Width = 6
-    Height = 585
-  end
   object FindPanel: TPanel
     Left = 0
     Top = 0
@@ -40,7 +41,17 @@ object MainForm: TMainForm
     Align = alTop
     BevelOuter = bvNone
     ShowCaption = False
-    TabOrder = 1
+    TabOrder = 2
+    DesignSize = (
+      964
+      34)
+    object FindLabel: TLabel
+      Left = 214
+      Top = 9
+      Width = 23
+      Height = 15
+      Caption = 'Find'
+    end
     object OpenButton: TButton
       Left = 6
       Top = 4
@@ -68,13 +79,6 @@ object MainForm: TMainForm
       TabOrder = 2
       OnClick = ReloadClick
     end
-    object FindLabel: TLabel
-      Left = 214
-      Top = 9
-      Width = 24
-      Height = 15
-      Caption = 'Find'
-    end
     object FindEdit: TEdit
       Left = 252
       Top = 5
@@ -93,6 +97,23 @@ object MainForm: TMainForm
       TabOrder = 4
       OnClick = ClearFindClick
     end
+  end
+  object Viewer: TMarkDownViewer
+    Left = 396
+    Top = 34
+    Width = 568
+    Height = 585
+    Align = alClient
+    Font.Charset = DEFAULT_CHARSET
+    Font.Color = clWindowText
+    Font.Height = -13
+    Font.Name = 'Segoe UI'
+    Font.Style = []
+    ParentColor = False
+    ParentFont = False
+    TabOrder = 1
+    OnLinkClick = LinkClicked
+    OnScroll = SyncEditorToViewer
   end
   object StatusBar: TStatusBar
     Left = 0
