@@ -5,6 +5,7 @@ interface
 uses
   DUnitX.TestFramework,
   System.Classes,
+  Vcl.Controls,
   Vcl.Forms,
   MarkdownViewerVCL;
 
@@ -13,6 +14,9 @@ type
   public
     procedure PressKey(Value: Word; Shift: TShiftState = []);
     procedure TypeCharacter(Value: Char);
+    procedure ClickMouse(X, Y: Integer);
+    procedure DragMouse(X1, Y1, X2, Y2: Integer);
+    function HoverShowsLink(X, Y: Integer): Boolean;
   end;
 
   [TestFixture]
@@ -21,9 +25,12 @@ type
     FChangeCount: Integer;
     FForm: TForm;
     FViewer: TTestMarkDownViewer;
+    FLinkUrl: string;
     procedure HandleViewerChange(Sender: TObject);
+    procedure HandleLinkClick(Sender: TObject; const Url: string);
     procedure RepaintViewer;
     procedure ShowViewer(AWidth, AHeight: Integer);
+    function FindLinkPoint(out X, Y: Integer): Boolean;
   public
     [TearDown]
     procedure TearDown;
@@ -31,6 +38,24 @@ type
     procedure UsesReadableDefaultFont;
     [Test]
     procedure ReadOnlyIsEnabledByDefault;
+    [Test]
+    procedure ExposesExpectedColorDefaults;
+    [Test]
+    procedure PropertiesRoundTrip;
+    [Test]
+    procedure LoadFromFileSetsBasePathAndContent;
+    [Test]
+    procedure SelectAllCopiesRenderedPlainText;
+    [Test]
+    procedure HardLineBreakCopiesAsLineBreak;
+    [Test]
+    procedure FullSelectionCopyMarkdownReturnsSource;
+    [Test]
+    procedure PartialSelectionCopyReconstructsBoldMarkdown;
+    [Test]
+    procedure ClickingLinkFiresOnLinkClick;
+    [Test]
+    procedure MouseDragSelectsText;
     [Test]
     procedure AppendsMarkdownWithoutReplacingExistingText;
     [Test]
@@ -64,8 +89,30 @@ type
 implementation
 
 uses
+  System.IOUtils,
   System.SysUtils,
+  System.UITypes,
+  Vcl.Clipbrd,
+  Vcl.Graphics,
   Winapi.Windows;
+
+function GetClipboardText: string;
+begin
+  try
+    Result := Clipboard.AsText;
+  except
+    Result := '';
+  end;
+end;
+
+procedure ClearClipboard;
+begin
+  try
+    Clipboard.AsText := '';
+  except
+    // Another process briefly held the clipboard; ignore.
+  end;
+end;
 
 procedure TTestMarkDownViewer.PressKey(Value: Word; Shift: TShiftState);
 var
@@ -80,9 +127,59 @@ begin
   KeyPress(Value);
 end;
 
+procedure TTestMarkDownViewer.ClickMouse(X, Y: Integer);
+begin
+  MouseDown(mbLeft, [], X, Y);
+  MouseUp(mbLeft, [], X, Y);
+end;
+
+procedure TTestMarkDownViewer.DragMouse(X1, Y1, X2, Y2: Integer);
+begin
+  MouseDown(mbLeft, [], X1, Y1);
+  MouseMove([], X2, Y2);
+  MouseUp(mbLeft, [], X2, Y2);
+end;
+
+function TTestMarkDownViewer.HoverShowsLink(X, Y: Integer): Boolean;
+begin
+  MouseMove([], X, Y);
+  Result := Cursor = crHandPoint;
+end;
+
 procedure TMarkDownViewerTests.HandleViewerChange(Sender: TObject);
 begin
   Inc(FChangeCount);
+end;
+
+procedure TMarkDownViewerTests.HandleLinkClick(Sender: TObject; const Url: string);
+begin
+  FLinkUrl := Url;
+end;
+
+// Locates a point inside a rendered link by sweeping the client area for the
+// hand cursor the viewer shows over links (requires ReadOnly). This keeps the
+// click tests independent of fonts, margins, and exact layout geometry.
+function TMarkDownViewerTests.FindLinkPoint(out X, Y: Integer): Boolean;
+var
+  PX, PY: Integer;
+begin
+  Result := False;
+  PY := 0;
+  while PY < FViewer.ClientHeight do
+  begin
+    PX := 0;
+    while PX < FViewer.ClientWidth do
+    begin
+      if FViewer.HoverShowsLink(PX, PY) then
+      begin
+        X := PX;
+        Y := PY;
+        Exit(True);
+      end;
+      Inc(PX, 2);
+    end;
+    Inc(PY, 3);
+  end;
 end;
 
 procedure TMarkDownViewerTests.ShowViewer(AWidth, AHeight: Integer);
@@ -129,6 +226,162 @@ begin
   finally
     Viewer.Free;
   end;
+end;
+
+procedure TMarkDownViewerTests.ExposesExpectedColorDefaults;
+var
+  Viewer: TMarkDownViewer;
+begin
+  Viewer := TMarkDownViewer.Create(nil);
+  try
+    Assert.AreEqual(Integer(clHighlight), Integer(Viewer.LinkColor));
+    Assert.AreEqual(Integer($00F2F2F2), Integer(Viewer.CodeBackgroundColor));
+    Assert.AreEqual(Integer(clSilver), Integer(Viewer.QuoteBarColor));
+    Assert.AreEqual(Integer($00BFFFFF), Integer(Viewer.SearchHighlightColor));
+  finally
+    Viewer.Free;
+  end;
+end;
+
+procedure TMarkDownViewerTests.PropertiesRoundTrip;
+var
+  Viewer: TMarkDownViewer;
+begin
+  Viewer := TMarkDownViewer.Create(nil);
+  try
+    Viewer.LinkColor := clRed;
+    Viewer.CodeBackgroundColor := clYellow;
+    Viewer.QuoteBarColor := clGreen;
+    Viewer.SearchHighlightColor := clAqua;
+    Viewer.BasePath := 'C:\docs\';
+    Viewer.SearchText := 'needle';
+    Viewer.ReadOnly := False;
+
+    Assert.AreEqual(Integer(clRed), Integer(Viewer.LinkColor));
+    Assert.AreEqual(Integer(clYellow), Integer(Viewer.CodeBackgroundColor));
+    Assert.AreEqual(Integer(clGreen), Integer(Viewer.QuoteBarColor));
+    Assert.AreEqual(Integer(clAqua), Integer(Viewer.SearchHighlightColor));
+    Assert.AreEqual('C:\docs\', Viewer.BasePath);
+    Assert.AreEqual('needle', Viewer.SearchText);
+    Assert.IsFalse(Viewer.ReadOnly);
+  finally
+    Viewer.Free;
+  end;
+end;
+
+procedure TMarkDownViewerTests.LoadFromFileSetsBasePathAndContent;
+var
+  Viewer: TMarkDownViewer;
+  FileName: string;
+begin
+  FileName := TPath.Combine(TPath.GetTempPath,
+    'KaiMarkdownViewerTest_' + TGuid.NewGuid.ToString + '.md');
+  TFile.WriteAllText(FileName, '# Loaded' + sLineBreak + 'body text');
+  Viewer := TMarkDownViewer.Create(nil);
+  try
+    Viewer.LoadFromFile(FileName);
+    Assert.AreEqual(ExtractFilePath(FileName), Viewer.BasePath);
+    Assert.IsTrue(Viewer.MarkdownText.Contains('# Loaded'), Viewer.MarkdownText);
+    Assert.IsTrue(Viewer.MarkdownText.Contains('body text'), Viewer.MarkdownText);
+  finally
+    Viewer.Free;
+    TFile.Delete(FileName);
+  end;
+end;
+
+procedure TMarkDownViewerTests.SelectAllCopiesRenderedPlainText;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := '**bold _italic_**';
+  RepaintViewer;
+
+  ClearClipboard;
+  FViewer.SelectAll;
+  FViewer.CopySelection(True);
+
+  // The full selection picks up the trailing block break; the run text is the
+  // point of interest here.
+  Assert.AreEqual('bold italic', GetClipboardText.Trim);
+end;
+
+procedure TMarkDownViewerTests.HardLineBreakCopiesAsLineBreak;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'first  ' + sLineBreak + 'second';
+  RepaintViewer;
+
+  ClearClipboard;
+  FViewer.SelectAll;
+  FViewer.CopySelection(True);
+
+  // Trim only removes the trailing block break, leaving the internal hard
+  // break that the two trailing spaces produced.
+  Assert.AreEqual('first' + sLineBreak + 'second', GetClipboardText.Trim);
+end;
+
+procedure TMarkDownViewerTests.FullSelectionCopyMarkdownReturnsSource;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := '# Heading';
+  RepaintViewer;
+
+  ClearClipboard;
+  FViewer.SelectAll;
+  FViewer.CopySelection(False);
+
+  Assert.AreEqual('# Heading', GetClipboardText.Trim);
+end;
+
+procedure TMarkDownViewerTests.PartialSelectionCopyReconstructsBoldMarkdown;
+var
+  I: Integer;
+begin
+  // A partial selection bypasses the whole-document shortcut and forces the
+  // per-run markdown reconstruction used for copying styled spans.
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := '**bold** x';
+  RepaintViewer;
+
+  FViewer.PressKey(VK_HOME, [ssCtrl]);
+  for I := 1 to 5 do
+    FViewer.PressKey(VK_RIGHT, [ssShift]);
+
+  ClearClipboard;
+  FViewer.CopySelection(False);
+
+  Assert.IsTrue(GetClipboardText.Contains('**bold**'), GetClipboardText);
+end;
+
+procedure TMarkDownViewerTests.ClickingLinkFiresOnLinkClick;
+var
+  LinkX, LinkY: Integer;
+begin
+  ShowViewer(400, 300);
+  FViewer.ReadOnly := True;
+  FViewer.MarkdownText := '[Example](https://example.com/)';
+  RepaintViewer;
+  FViewer.OnLinkClick := HandleLinkClick;
+  FLinkUrl := '';
+
+  Assert.IsTrue(FindLinkPoint(LinkX, LinkY), 'no link region was rendered');
+  FViewer.ClickMouse(LinkX, LinkY);
+
+  Assert.AreEqual('https://example.com/', FLinkUrl);
+end;
+
+procedure TMarkDownViewerTests.MouseDragSelectsText;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'alpha bravo charlie';
+  RepaintViewer;
+
+  // Drag across the first line (content origin is at the padding offset).
+  FViewer.DragMouse(0, 22, 10000, 22);
+
+  ClearClipboard;
+  FViewer.CopySelection(True);
+
+  Assert.AreEqual('alpha bravo charlie', GetClipboardText);
 end;
 
 procedure TMarkDownViewerTests.AppendsMarkdownWithoutReplacingExistingText;
