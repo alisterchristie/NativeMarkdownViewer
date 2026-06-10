@@ -28,6 +28,7 @@ type
     FLastBlockTop: Integer;
     FSelectionAnchor: Integer;
     FSelectionCaret: Integer;
+    FDesiredCaretX: Integer;
     FSelecting: Boolean;
     FLinkColor: TColor;
     FCodeBackgroundColor: TColor;
@@ -38,6 +39,10 @@ type
     FSearchText: string;
     FAppendEndedWithCR: Boolean;
     FUpdatingMarkdown: Boolean;
+    FReadOnly: Boolean;
+    FUndoText: string;
+    FHasUndo: Boolean;
+    FOnChange: TNotifyEvent;
     FOnLinkClick: TMarkDownLinkClickEvent;
     FOnScroll: TNotifyEvent;
     function GetMarkdown: TStrings;
@@ -46,14 +51,24 @@ type
     function HasSelection: Boolean;
     function HitTestTextPosition(X, Y: Integer): Integer;
     function IsMarkdownStored: Boolean;
+    function SelectableToSourcePosition(Position: Integer): Integer;
+    function SourceToSelectablePosition(Position: Integer): Integer;
     procedure ClearSelection;
     procedure ClearInlineTokenCaches;
     procedure CopySelectionToClipboard(PlainText: Boolean);
+    procedure DeleteSelectionOrCharacter(Backwards: Boolean);
+    procedure InsertTextAtSelection(const Value: string);
     procedure InvalidateLayout;
     procedure MarkdownChanged(Sender: TObject);
+    procedure MoveCaret(Delta: Integer; ExtendSelection: Boolean);
+    procedure MoveCaretLineBoundary(ToEnd, ExtendSelection: Boolean);
+    procedure MoveCaretPage(Direction: Integer; ExtendSelection: Boolean);
+    procedure MoveCaretVertical(Direction: Integer; ExtendSelection: Boolean);
+    procedure MoveCaretDocumentBoundary(ToEnd, ExtendSelection: Boolean);
     procedure SelectAllText;
     procedure SetBasePath(const Value: string);
     procedure SetCodeBackgroundColor(const Value: TColor);
+    procedure SetReadOnly(const Value: Boolean);
     procedure SetLinkColor(const Value: TColor);
     procedure SetMarkdown(const Value: TStrings);
     procedure SetMarkdownText(const Value: string);
@@ -70,6 +85,7 @@ type
   protected
     procedure CreateParams(var Params: TCreateParams); override;
     procedure KeyDown(var Key: Word; Shift: TShiftState); override;
+    procedure KeyPress(var Key: Char); override;
     procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Integer); override;
     procedure MouseMove(Shift: TShiftState; X, Y: Integer); override;
     procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: Integer); override;
@@ -82,6 +98,7 @@ type
     procedure CopySelection(PlainText: Boolean = False);
     procedure LoadFromFile(const FileName: string);
     procedure SelectAll;
+    procedure Undo;
     property MarkdownText: string read GetMarkdownText write SetMarkdownText;
     property MaxScrollPosition: Integer read GetMaxScrollPosition;
     property ScrollPosition: Integer read FScrollPos write SetScrollPosition;
@@ -92,6 +109,7 @@ type
     property Color default clWindow;
     property CodeBackgroundColor: TColor read FCodeBackgroundColor write SetCodeBackgroundColor default $00F2F2F2;
     property Constraints;
+    property ReadOnly: Boolean read FReadOnly write SetReadOnly default True;
     property Enabled;
     property Font;
     property LinkColor: TColor read FLinkColor write SetLinkColor default clHighlight;
@@ -107,6 +125,7 @@ type
     property TabStop default True;
     property Visible;
     property OnClick;
+    property OnChange: TNotifyEvent read FOnChange write FOnChange;
     property OnDblClick;
     property OnEnter;
     property OnExit;
@@ -846,6 +865,8 @@ begin
   FLinkHits := TMarkDownLinkHitList.Create;
   FTextRuns := TMarkDownTextRunList.Create;
   FCopyChunks := TMarkDownCopyChunkList.Create;
+  FDesiredCaretX := -1;
+  FReadOnly := True;
   Font.Size := 10;
 end;
 
@@ -906,8 +927,65 @@ begin
         SelectAllText;
       Ord('C'):
         CopySelectionToClipboard(ssShift in Shift);
+      Ord('V'):
+        if not FReadOnly then
+          InsertTextAtSelection(Clipboard.AsText)
+        else
+          Handled := False;
+      Ord('X'):
+        if not FReadOnly and HasSelection then
+        begin
+          CopySelectionToClipboard(False);
+          InsertTextAtSelection('');
+        end
+        else
+          Handled := False;
+      Ord('Z'):
+        if not FReadOnly then
+          Undo
+        else
+          Handled := False;
       VK_INSERT:
         CopySelectionToClipboard(True);
+      VK_HOME:
+        if not FReadOnly then
+          MoveCaretDocumentBoundary(False, ssShift in Shift)
+        else
+          SetScrollPosition(0);
+      VK_END:
+        if not FReadOnly then
+          MoveCaretDocumentBoundary(True, ssShift in Shift)
+        else
+          SetScrollPosition(FContentHeight);
+    else
+      Handled := False;
+    end;
+  end
+  else if not FReadOnly then
+  begin
+    case Key of
+      VK_LEFT:
+        MoveCaret(-1, ssShift in Shift);
+      VK_RIGHT:
+        MoveCaret(1, ssShift in Shift);
+      VK_UP:
+        MoveCaretVertical(-1, ssShift in Shift);
+      VK_DOWN:
+        MoveCaretVertical(1, ssShift in Shift);
+      VK_HOME:
+        MoveCaretLineBoundary(False, ssShift in Shift);
+      VK_END:
+        MoveCaretLineBoundary(True, ssShift in Shift);
+      VK_PRIOR:
+        MoveCaretPage(-1, ssShift in Shift);
+      VK_NEXT:
+        MoveCaretPage(1, ssShift in Shift);
+      VK_BACK:
+        DeleteSelectionOrCharacter(True);
+      VK_DELETE:
+        DeleteSelectionOrCharacter(False);
+      VK_ESCAPE:
+        ClearSelection;
     else
       Handled := False;
     end;
@@ -941,6 +1019,28 @@ begin
 
   if Handled then
     Key := 0;
+end;
+
+procedure TMarkDownViewer.KeyPress(var Key: Char);
+begin
+  inherited KeyPress(Key);
+  if FReadOnly then
+    Exit;
+
+  case Key of
+    #8:
+      Key := #0;
+    #13:
+      begin
+        InsertTextAtSelection(sLineBreak);
+        Key := #0;
+      end;
+    #32..#65535:
+      begin
+        InsertTextAtSelection(Key);
+        Key := #0;
+      end;
+  end;
 end;
 
 function TMarkDownViewer.GetMarkdownText: string;
@@ -1020,6 +1120,55 @@ begin
   Result := FMarkdown.Count > 0;
 end;
 
+function TMarkDownViewer.SelectableToSourcePosition(Position: Integer): Integer;
+var
+  Chunk: TMarkDownCopyChunk;
+  I: Integer;
+begin
+  Result := 0;
+  Position := EnsureRange(Position, 0, Length(FSelectableText));
+  for I := 0 to FCopyChunks.Count - 1 do
+  begin
+    Chunk := FCopyChunks[I];
+    if Chunk.SourceStartIndex < 0 then
+      Continue;
+    if Position < Chunk.StartIndex then
+      Exit(Chunk.SourceStartIndex);
+    if (Position = Chunk.StartIndex + Length(Chunk.Text)) and
+      (I < FCopyChunks.Count - 1) and
+      (FCopyChunks[I + 1].StartIndex = Position) and
+      (FCopyChunks[I + 1].SourceStartIndex >= 0) then
+      Continue;
+    if Position <= Chunk.StartIndex + Length(Chunk.Text) then
+      Exit(Chunk.SourceStartIndex +
+        EnsureRange(Position - Chunk.StartIndex, 0, Length(Chunk.Text)));
+    Result := Chunk.SourceStartIndex + Length(Chunk.Text);
+  end;
+  Result := EnsureRange(Result, 0, Length(FMarkdown.Text));
+end;
+
+function TMarkDownViewer.SourceToSelectablePosition(Position: Integer): Integer;
+var
+  Chunk: TMarkDownCopyChunk;
+  I: Integer;
+begin
+  Result := 0;
+  Position := EnsureRange(Position, 0, Length(FMarkdown.Text));
+  for I := 0 to FCopyChunks.Count - 1 do
+  begin
+    Chunk := FCopyChunks[I];
+    if Chunk.SourceStartIndex < 0 then
+      Continue;
+    if Position < Chunk.SourceStartIndex then
+      Exit(Chunk.StartIndex);
+    if Position <= Chunk.SourceStartIndex + Length(Chunk.Text) then
+      Exit(Chunk.StartIndex +
+        EnsureRange(Position - Chunk.SourceStartIndex, 0, Length(Chunk.Text)));
+    Result := Chunk.StartIndex + Length(Chunk.Text);
+  end;
+  Result := EnsureRange(Result, 0, Length(FSelectableText));
+end;
+
 procedure TMarkDownViewer.ClearSelection;
 begin
   if HasSelection then
@@ -1089,6 +1238,351 @@ end;
 procedure TMarkDownViewer.CopySelection(PlainText: Boolean);
 begin
   CopySelectionToClipboard(PlainText);
+end;
+
+procedure TMarkDownViewer.DeleteSelectionOrCharacter(Backwards: Boolean);
+begin
+  if HasSelection then
+  begin
+    InsertTextAtSelection('');
+    Exit;
+  end;
+
+  if Backwards then
+  begin
+    if FSelectionCaret = 0 then
+      Exit;
+    FSelectionAnchor := FSelectionCaret - 1;
+  end
+  else
+  begin
+    if FSelectionCaret >= Length(FSelectableText) then
+      Exit;
+    FSelectionAnchor := FSelectionCaret + 1;
+  end;
+  InsertTextAtSelection('');
+end;
+
+procedure TMarkDownViewer.InsertTextAtSelection(const Value: string);
+var
+  NewSourceCaret: Integer;
+  SelEnd: Integer;
+  SelStart: Integer;
+  SourceEnd: Integer;
+  SourceStart: Integer;
+  SourceText: string;
+  Temp: Integer;
+begin
+  if FReadOnly then
+    Exit;
+  if FSelectableText = '' then
+    Repaint;
+
+  SelStart := Min(FSelectionAnchor, FSelectionCaret);
+  SelEnd := Max(FSelectionAnchor, FSelectionCaret);
+  SourceStart := SelectableToSourcePosition(SelStart);
+  SourceEnd := SelectableToSourcePosition(SelEnd);
+  if SourceEnd < SourceStart then
+  begin
+    Temp := SourceStart;
+    SourceStart := SourceEnd;
+    SourceEnd := Temp;
+  end;
+
+  SourceText := FMarkdown.Text;
+  FUndoText := SourceText;
+  FHasUndo := True;
+  Delete(SourceText, SourceStart + 1, SourceEnd - SourceStart);
+  Insert(Value, SourceText, SourceStart + 1);
+  NewSourceCaret := SourceStart + Length(Value);
+
+  FMarkdown.Text := SourceText;
+  Repaint;
+  FSelectionCaret := SourceToSelectablePosition(NewSourceCaret);
+  FSelectionAnchor := FSelectionCaret;
+  FDesiredCaretX := -1;
+  Invalidate;
+end;
+
+procedure TMarkDownViewer.MoveCaret(Delta: Integer; ExtendSelection: Boolean);
+var
+  NewPosition: Integer;
+begin
+  if FSelectableText = '' then
+    Repaint;
+  if not ExtendSelection and HasSelection then
+  begin
+    if Delta < 0 then
+      NewPosition := Min(FSelectionAnchor, FSelectionCaret)
+    else
+      NewPosition := Max(FSelectionAnchor, FSelectionCaret);
+  end
+  else
+    NewPosition := EnsureRange(FSelectionCaret + Delta, 0,
+      Length(FSelectableText));
+
+  FSelectionCaret := NewPosition;
+  if not ExtendSelection then
+    FSelectionAnchor := NewPosition;
+  FDesiredCaretX := -1;
+  Invalidate;
+end;
+
+procedure TMarkDownViewer.MoveCaretDocumentBoundary(ToEnd,
+  ExtendSelection: Boolean);
+var
+  NewPosition: Integer;
+begin
+  if FSelectableText = '' then
+    Repaint;
+  if ToEnd then
+  begin
+    if FTextRuns.Count > 0 then
+      NewPosition := FTextRuns.Last.StartIndex +
+        Length(FTextRuns.Last.Text)
+    else
+      NewPosition := Length(FSelectableText);
+  end
+  else
+    NewPosition := 0;
+
+  FSelectionCaret := NewPosition;
+  if not ExtendSelection then
+    FSelectionAnchor := NewPosition;
+  FDesiredCaretX := -1;
+  if ToEnd then
+    SetScrollPosition(FContentHeight)
+  else
+    SetScrollPosition(0);
+end;
+
+procedure TMarkDownViewer.MoveCaretLineBoundary(ToEnd,
+  ExtendSelection: Boolean);
+var
+  CurrentRun: TMarkDownTextRun;
+  CurrentTop: Integer;
+  I: Integer;
+  NewPosition: Integer;
+  Run: TMarkDownTextRun;
+begin
+  if FSelectableText = '' then
+    Repaint;
+  if FTextRuns.Count = 0 then
+    Exit;
+
+  CurrentRun := FTextRuns.Last;
+  for I := 0 to FTextRuns.Count - 1 do
+  begin
+    Run := FTextRuns[I];
+    if (FSelectionCaret >= Run.StartIndex) and
+      (FSelectionCaret <= Run.StartIndex + Length(Run.Text)) then
+    begin
+      CurrentRun := Run;
+      if FSelectionCaret = Run.StartIndex then
+        Break;
+    end;
+  end;
+
+  CurrentTop := CurrentRun.Rect.Top;
+  if ToEnd then
+  begin
+    NewPosition := CurrentRun.StartIndex + Length(CurrentRun.Text);
+    for I := 0 to FTextRuns.Count - 1 do
+      if FTextRuns[I].Rect.Top = CurrentTop then
+        NewPosition := Max(NewPosition, FTextRuns[I].StartIndex +
+          Length(FTextRuns[I].Text));
+  end
+  else
+  begin
+    NewPosition := CurrentRun.StartIndex;
+    for I := 0 to FTextRuns.Count - 1 do
+      if FTextRuns[I].Rect.Top = CurrentTop then
+        NewPosition := Min(NewPosition, FTextRuns[I].StartIndex);
+  end;
+
+  FSelectionCaret := NewPosition;
+  if not ExtendSelection then
+    FSelectionAnchor := NewPosition;
+  FDesiredCaretX := -1;
+  Invalidate;
+end;
+
+procedure TMarkDownViewer.MoveCaretPage(Direction: Integer;
+  ExtendSelection: Boolean);
+var
+  CurrentRun: TMarkDownTextRun;
+  CurrentTop: Integer;
+  DesiredTop: Integer;
+  I: Integer;
+  LocalPosition: Integer;
+  NewPosition: Integer;
+  Run: TMarkDownTextRun;
+  TargetBottom: Integer;
+  TargetDistance: Integer;
+  TargetTop: Integer;
+begin
+  if FSelectableText = '' then
+    Repaint;
+  if FTextRuns.Count = 0 then
+    Exit;
+
+  if not ExtendSelection and HasSelection then
+  begin
+    if Direction < 0 then
+      FSelectionCaret := Min(FSelectionAnchor, FSelectionCaret)
+    else
+      FSelectionCaret := Max(FSelectionAnchor, FSelectionCaret);
+    FSelectionAnchor := FSelectionCaret;
+  end;
+
+  CurrentRun := FTextRuns.Last;
+  for I := 0 to FTextRuns.Count - 1 do
+  begin
+    Run := FTextRuns[I];
+    if (FSelectionCaret >= Run.StartIndex) and
+      (FSelectionCaret <= Run.StartIndex + Length(Run.Text)) then
+    begin
+      CurrentRun := Run;
+      if FSelectionCaret = Run.StartIndex then
+        Break;
+    end;
+  end;
+
+  if FDesiredCaretX < 0 then
+  begin
+    Canvas.Font.Assign(Font);
+    Canvas.Font.Name := CurrentRun.FontName;
+    Canvas.Font.Size := CurrentRun.FontSize;
+    Canvas.Font.Style := CurrentRun.FontStyle;
+    LocalPosition := EnsureRange(FSelectionCaret - CurrentRun.StartIndex,
+      0, Length(CurrentRun.Text));
+    FDesiredCaretX := CurrentRun.Rect.Left +
+      Canvas.TextWidth(Copy(CurrentRun.Text, 1, LocalPosition));
+  end;
+
+  CurrentTop := CurrentRun.Rect.Top;
+  DesiredTop := CurrentTop + (Direction * Max(1, ClientHeight -
+    CurrentRun.Rect.Height));
+  TargetTop := CurrentTop;
+  TargetDistance := High(Integer);
+  for I := 0 to FTextRuns.Count - 1 do
+  begin
+    Run := FTextRuns[I];
+    if ((Direction < 0) and (Run.Rect.Top >= CurrentTop)) or
+      ((Direction > 0) and (Run.Rect.Top <= CurrentTop)) then
+      Continue;
+    if Abs(Run.Rect.Top - DesiredTop) < TargetDistance then
+    begin
+      TargetDistance := Abs(Run.Rect.Top - DesiredTop);
+      TargetTop := Run.Rect.Top;
+    end;
+  end;
+  if TargetTop = CurrentTop then
+    Exit;
+
+  TargetBottom := TargetTop;
+  for I := 0 to FTextRuns.Count - 1 do
+    if FTextRuns[I].Rect.Top = TargetTop then
+      TargetBottom := Max(TargetBottom, FTextRuns[I].Rect.Bottom);
+  NewPosition := HitTestTextPosition(FDesiredCaretX,
+    TargetTop + ((TargetBottom - TargetTop) div 2));
+
+  FSelectionCaret := NewPosition;
+  if not ExtendSelection then
+    FSelectionAnchor := NewPosition;
+  SetScrollPosition(FScrollPos + TargetTop - CurrentTop);
+end;
+
+procedure TMarkDownViewer.MoveCaretVertical(Direction: Integer;
+  ExtendSelection: Boolean);
+var
+  CurrentRun: TMarkDownTextRun;
+  CurrentTop: Integer;
+  I: Integer;
+  LocalPosition: Integer;
+  NewPosition: Integer;
+  Run: TMarkDownTextRun;
+  TargetBottom: Integer;
+  TargetTop: Integer;
+  TargetY: Integer;
+begin
+  if FSelectableText = '' then
+    Repaint;
+  if FTextRuns.Count = 0 then
+    Exit;
+
+  if not ExtendSelection and HasSelection then
+  begin
+    if Direction < 0 then
+      FSelectionCaret := Min(FSelectionAnchor, FSelectionCaret)
+    else
+      FSelectionCaret := Max(FSelectionAnchor, FSelectionCaret);
+    FSelectionAnchor := FSelectionCaret;
+  end;
+
+  CurrentRun := FTextRuns.Last;
+  for I := 0 to FTextRuns.Count - 1 do
+  begin
+    Run := FTextRuns[I];
+    if FSelectionCaret <= Run.StartIndex + Length(Run.Text) then
+    begin
+      CurrentRun := Run;
+      Break;
+    end;
+  end;
+
+  if FDesiredCaretX < 0 then
+  begin
+    Canvas.Font.Assign(Font);
+    Canvas.Font.Name := CurrentRun.FontName;
+    Canvas.Font.Size := CurrentRun.FontSize;
+    Canvas.Font.Style := CurrentRun.FontStyle;
+    LocalPosition := EnsureRange(FSelectionCaret - CurrentRun.StartIndex,
+      0, Length(CurrentRun.Text));
+    FDesiredCaretX := CurrentRun.Rect.Left +
+      Canvas.TextWidth(Copy(CurrentRun.Text, 1, LocalPosition));
+  end;
+
+  CurrentTop := CurrentRun.Rect.Top;
+  if Direction < 0 then
+  begin
+    TargetTop := Low(Integer);
+    for I := 0 to FTextRuns.Count - 1 do
+      if (FTextRuns[I].Rect.Top < CurrentTop) and
+        (FTextRuns[I].Rect.Top > TargetTop) then
+        TargetTop := FTextRuns[I].Rect.Top;
+    if TargetTop = Low(Integer) then
+      Exit;
+  end
+  else
+  begin
+    TargetTop := High(Integer);
+    for I := 0 to FTextRuns.Count - 1 do
+      if (FTextRuns[I].Rect.Top > CurrentTop) and
+        (FTextRuns[I].Rect.Top < TargetTop) then
+        TargetTop := FTextRuns[I].Rect.Top;
+    if TargetTop = High(Integer) then
+      Exit;
+  end;
+
+  TargetBottom := TargetTop;
+  for I := 0 to FTextRuns.Count - 1 do
+    if FTextRuns[I].Rect.Top = TargetTop then
+      TargetBottom := Max(TargetBottom, FTextRuns[I].Rect.Bottom);
+  TargetY := TargetTop + ((TargetBottom - TargetTop) div 2);
+  NewPosition := HitTestTextPosition(FDesiredCaretX, TargetY);
+
+  FSelectionCaret := NewPosition;
+  if not ExtendSelection then
+    FSelectionAnchor := NewPosition;
+
+  if TargetTop < 0 then
+    SetScrollPosition(FScrollPos + TargetTop - MarkdownPadding)
+  else if TargetBottom > ClientHeight then
+    SetScrollPosition(FScrollPos + TargetBottom - ClientHeight +
+      MarkdownPadding)
+  else
+    Invalidate;
 end;
 
 procedure TMarkDownViewer.AppendMarkdownText(const Value: string);
@@ -1209,9 +1703,13 @@ begin
     FCopyChunks.Clear;
   Invalidate;
   UpdateScrollBar;
+  if Assigned(FOnChange) then
+    FOnChange(Self);
 end;
 
 procedure TMarkDownViewer.MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+var
+  Position: Integer;
 begin
   inherited;
   if CanFocus then
@@ -1219,8 +1717,11 @@ begin
   if Button <> mbLeft then
     Exit;
 
-  FSelectionAnchor := HitTestTextPosition(X, Y);
-  FSelectionCaret := FSelectionAnchor;
+  Position := HitTestTextPosition(X, Y);
+  FDesiredCaretX := -1;
+  if not (ssShift in Shift) then
+    FSelectionAnchor := Position;
+  FSelectionCaret := Position;
   FSelecting := True;
   MouseCapture := True;
   Invalidate;
@@ -1247,10 +1748,13 @@ begin
         Break;
       end;
 
-  if IsLink then
+  if IsLink and (FReadOnly or (ssCtrl in Shift)) then
     Cursor := crHandPoint
   else
-    Cursor := crDefault;
+    if not FReadOnly then
+      Cursor := crIBeam
+    else
+      Cursor := crDefault;
 end;
 
 procedure TMarkDownViewer.MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
@@ -1271,6 +1775,8 @@ begin
   end;
 
   if HasSelection then
+    Exit;
+  if not FReadOnly and not (ssCtrl in Shift) then
     Exit;
 
   if FLinkHits <> nil then
@@ -1312,6 +1818,8 @@ var
   TextIndent: Integer;
   LineTextStart: Integer;
   OldBkMode: Integer;
+  SourceScanPosition: Integer;
+  SourceText: string;
 
   function InlineTokensForBlock(ABlock: TMarkDownBlock): TMarkDownInlineList;
   begin
@@ -1335,7 +1843,22 @@ var
     end;
   end;
 
-  procedure AddCopyChunk(TextStart: Integer; const AText, AMarkdownText: string);
+  function FindSourceStart(const AText: string): Integer;
+  var
+    FoundAt: Integer;
+  begin
+    Result := -1;
+    if AText = '' then
+      Exit;
+    FoundAt := PosEx(AText, SourceText, SourceScanPosition);
+    if FoundAt = 0 then
+      Exit;
+    Result := FoundAt - 1;
+    SourceScanPosition := FoundAt + Length(AText);
+  end;
+
+  procedure AddCopyChunk(TextStart, SourceStart: Integer;
+    const AText, AMarkdownText: string);
   var
     Chunk: TMarkDownCopyChunk;
   begin
@@ -1343,6 +1866,7 @@ var
       Exit;
 
     Chunk.StartIndex := TextStart;
+    Chunk.SourceStartIndex := SourceStart;
     Chunk.Text := AText;
     if AMarkdownText <> '' then
       Chunk.MarkdownText := AMarkdownText
@@ -1369,10 +1893,11 @@ var
     else
       Run.MarkdownText := AText;
     Run.StartIndex := Result;
+    Run.SourceStartIndex := FindSourceStart(AText);
     Run.Text := AText;
     FTextRuns.Add(Run);
     FSelectableText := FSelectableText + AText;
-    AddCopyChunk(Result, AText, AMarkdownText);
+    AddCopyChunk(Result, Run.SourceStartIndex, AText, AMarkdownText);
   end;
 
   procedure AddSelectableText(const AText: string; const AMarkdownText: string = '');
@@ -1384,7 +1909,7 @@ var
 
     TextStart := Length(FSelectableText);
     FSelectableText := FSelectableText + AText;
-    AddCopyChunk(TextStart, AText, AMarkdownText);
+    AddCopyChunk(TextStart, FindSourceStart(AText), AText, AMarkdownText);
   end;
 
   procedure AddSelectableBreak;
@@ -1393,6 +1918,38 @@ var
       Exit;
     if not EndsText(sLineBreak, FSelectableText) then
       AddSelectableText(sLineBreak);
+  end;
+
+  procedure DrawCaret;
+  var
+    CaretPosition: Integer;
+    I: Integer;
+    Run: TMarkDownTextRun;
+    X: Integer;
+  begin
+    if FReadOnly or not Focused or HasSelection or
+      (FTextRuns.Count = 0) then
+      Exit;
+
+    CaretPosition := EnsureRange(FSelectionCaret, 0,
+      Length(FSelectableText));
+    Run := FTextRuns.Last;
+    for I := 0 to FTextRuns.Count - 1 do
+    begin
+      Run := FTextRuns[I];
+      if CaretPosition <= Run.StartIndex + Length(Run.Text) then
+        Break;
+    end;
+
+    Canvas.Font.Assign(Font);
+    Canvas.Font.Name := Run.FontName;
+    Canvas.Font.Size := Run.FontSize;
+    Canvas.Font.Style := Run.FontStyle;
+    X := Run.Rect.Left + Canvas.TextWidth(Copy(Run.Text, 1,
+      EnsureRange(CaretPosition - Run.StartIndex, 0, Length(Run.Text))));
+    Canvas.Pen.Color := Font.Color;
+    Canvas.MoveTo(X, Run.Rect.Top + 1);
+    Canvas.LineTo(X, Run.Rect.Bottom - 1);
   end;
 
   procedure DrawSelectionBackground(const AText: string; TextX, TextY, TextHeight, TextStart: Integer);
@@ -1962,6 +2519,8 @@ begin
   FTextRuns.Clear;
   FCopyChunks.Clear;
   FSelectableText := '';
+  SourceText := FMarkdown.Text;
+  SourceScanPosition := 1;
 
   Blocks := FBlocks;
   Y := MarkdownPadding - FScrollPos;
@@ -2120,6 +2679,7 @@ begin
     FContentHeight := TotalHeight;
     UpdateScrollBar;
   end;
+  DrawCaret;
 end;
 
 procedure TMarkDownViewer.Resize;
@@ -2222,6 +2782,31 @@ begin
     if Assigned(FOnScroll) then
       FOnScroll(Self);
   end;
+end;
+
+procedure TMarkDownViewer.SetReadOnly(const Value: Boolean);
+begin
+  if FReadOnly <> Value then
+  begin
+    FReadOnly := Value;
+    ClearSelection;
+    Invalidate;
+  end;
+end;
+
+procedure TMarkDownViewer.Undo;
+var
+  CurrentText: string;
+begin
+  if FReadOnly or not FHasUndo then
+    Exit;
+  CurrentText := FMarkdown.Text;
+  FMarkdown.Text := FUndoText;
+  FUndoText := CurrentText;
+  Repaint;
+  FSelectionAnchor := 0;
+  FSelectionCaret := 0;
+  Invalidate;
 end;
 
 procedure TMarkDownViewer.UpdateScrollBar;

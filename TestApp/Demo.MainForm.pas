@@ -31,6 +31,7 @@ type
     ExitMenuItem: TMenuItem;
     EditMenu: TMenuItem;
     UndoMenuItem: TMenuItem;
+    ReadOnlyMenuItem: TMenuItem;
     EditSeparator: TMenuItem;
     CutMenuItem: TMenuItem;
     CopyMenuItem: TMenuItem;
@@ -72,12 +73,14 @@ type
     procedure PasteClick(Sender: TObject);
     procedure ReloadClick(Sender: TObject);
     procedure ResetFontClick(Sender: TObject);
+    procedure ReadOnlyClick(Sender: TObject);
     procedure SaveAsClick(Sender: TObject);
     procedure SaveClick(Sender: TObject);
     procedure SelectAllClick(Sender: TObject);
     procedure ShowEditorClick(Sender: TObject);
     procedure SyncEditorToViewer(Sender: TObject);
     procedure UndoClick(Sender: TObject);
+    procedure ViewerChanged(Sender: TObject);
     procedure WordWrapClick(Sender: TObject);
   private
     FCurrentFileName: string;
@@ -209,9 +212,16 @@ end;
 
 procedure TMainForm.EditorChanged(Sender: TObject);
 begin
-  Viewer.Markdown.Assign(Editor.Lines);
-  if not FLoading then
-    SetModified(True);
+  if FLoading then
+    Exit;
+
+  FLoading := True;
+  try
+    Viewer.Markdown.Assign(Editor.Lines);
+  finally
+    FLoading := False;
+  end;
+  SetModified(True);
 end;
 
 procedure TMainForm.EditorWindowProc(var Message: TMessage);
@@ -402,6 +412,13 @@ begin
   Editor.Font.Size := 10;
 end;
 
+procedure TMainForm.ReadOnlyClick(Sender: TObject);
+begin
+  ReadOnlyMenuItem.Checked := not ReadOnlyMenuItem.Checked;
+  Viewer.ReadOnly := ReadOnlyMenuItem.Checked;
+  Editor.ReadOnly := ReadOnlyMenuItem.Checked;
+end;
+
 procedure TMainForm.SaveAsClick(Sender: TObject);
 begin
   SaveDialog.FileName := FCurrentFileName;
@@ -533,11 +550,27 @@ procedure TMainForm.UndoClick(Sender: TObject);
 begin
   if FindEdit.Focused then
     FindEdit.Undo
+  else if Viewer.Focused then
+    Viewer.Undo
   else if Editor.CanFocus then
   begin
     Editor.SetFocus;
     Editor.Undo;
   end;
+end;
+
+procedure TMainForm.ViewerChanged(Sender: TObject);
+begin
+  if FLoading then
+    Exit;
+
+  FLoading := True;
+  try
+    Editor.Lines.Assign(Viewer.Markdown);
+  finally
+    FLoading := False;
+  end;
+  SetModified(True);
 end;
 
 procedure TMainForm.UpdateInterface;

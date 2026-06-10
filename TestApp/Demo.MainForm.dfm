@@ -111,7 +111,9 @@ object MainForm: TMainForm
     Font.Style = []
     ParentColor = False
     ParentFont = False
+    ReadOnly = False
     TabOrder = 1
+    OnChange = ViewerChanged
     OnLinkClick = LinkClicked
     OnScroll = SyncEditorToViewer
   end
@@ -167,6 +169,10 @@ object MainForm: TMainForm
         Caption = '&Undo'
         ShortCut = 16474
         OnClick = UndoClick
+      end
+      object ReadOnlyMenuItem: TMenuItem
+        Caption = '&Read Only'
+        OnClick = ReadOnlyClick
       end
       object EditSeparator: TMenuItem
         Caption = '-'

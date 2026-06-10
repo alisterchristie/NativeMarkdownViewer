@@ -56,6 +56,7 @@ type
     FontStyle: TFontStyles;
     MarkdownText: string;
     Rect: TRect;
+    SourceStartIndex: Integer;
     StartIndex: Integer;
     Text: string;
   end;
@@ -64,6 +65,7 @@ type
 
   TMarkDownCopyChunk = record
     MarkdownText: string;
+    SourceStartIndex: Integer;
     StartIndex: Integer;
     Text: string;
   end;
