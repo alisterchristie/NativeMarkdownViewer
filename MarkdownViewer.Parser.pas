@@ -40,6 +40,7 @@ type
 implementation
 
 uses
+  System.Character,
   System.Math,
   System.StrUtils,
   System.SysUtils;
@@ -532,6 +533,33 @@ begin
     Result := PosEx(Needle, Text, Result + Length(Needle));
 end;
 
+function IsWordChar(C: Char): Boolean;
+begin
+  Result := C.IsLetterOrDigit;
+end;
+
+// Emphasis delimiters must hug their content (no space just inside them),
+// and underscore delimiters must additionally sit at word boundaries so
+// snake_case identifiers are not italicized.
+function CanOpenEmphasis(const Text: string; Index, DelimLen: Integer;
+  RequireWordBoundary: Boolean): Boolean;
+begin
+  Result := (Index + DelimLen <= Length(Text)) and
+    not CharInSet(Text[Index + DelimLen], [' ', #9]);
+  if Result and RequireWordBoundary then
+    Result := (Index = 1) or not IsWordChar(Text[Index - 1]);
+end;
+
+function CanCloseEmphasis(const Text: string; CloserIndex, DelimLen: Integer;
+  RequireWordBoundary: Boolean): Boolean;
+begin
+  Result := (CloserIndex > 1) and
+    not CharInSet(Text[CloserIndex - 1], [' ', #9]);
+  if Result and RequireWordBoundary then
+    Result := (CloserIndex + DelimLen > Length(Text)) or
+      not IsWordChar(Text[CloserIndex + DelimLen]);
+end;
+
 function IsAutoLinkBoundary(const Text: string; Index: Integer): Boolean;
 begin
   Result := (Index = 1) or CharInSet(Text[Index - 1], [' ', #9, '(', '[', '{', '<', '>', '"', '''']);
@@ -598,6 +626,7 @@ var
   NextIndex: Integer;
   Buffer: string;
   LinkText: string;
+  Marker: string;
   ReferenceName: string;
   LinkUrl: string;
 
@@ -641,10 +670,26 @@ begin
       end;
     end;
 
-    if Copy(Text, I, 2) = '~~' then
+    Marker := Copy(Text, I, 3);
+    if (Marker = '***') or (Marker = '___') then
+    begin
+      if CanOpenEmphasis(Text, I, 3, Marker = '___') then
+      begin
+        J := FindUnescaped(Marker, Text, I + 3);
+        if (J > I + 3) and CanCloseEmphasis(Text, J, 3, Marker = '___') then
+        begin
+          FlushBuffer;
+          AddToken(Result, ikBoldItalic, Copy(Text, I + 3, J - I - 3));
+          I := J + 3;
+          Continue;
+        end;
+      end;
+    end;
+
+    if (Copy(Text, I, 2) = '~~') and CanOpenEmphasis(Text, I, 2, False) then
     begin
       J := FindUnescaped('~~', Text, I + 2);
-      if J > I then
+      if (J > I + 2) and CanCloseEmphasis(Text, J, 2, False) then
       begin
         FlushBuffer;
         AddToken(Result, ikStrike, Copy(Text, I + 2, J - I - 2));
@@ -653,10 +698,10 @@ begin
       end;
     end;
 
-    if Copy(Text, I, 2) = '**' then
+    if (Copy(Text, I, 2) = '**') and CanOpenEmphasis(Text, I, 2, False) then
     begin
       J := FindUnescaped('**', Text, I + 2);
-      if J > I then
+      if (J > I + 2) and CanCloseEmphasis(Text, J, 2, False) then
       begin
         FlushBuffer;
         AddToken(Result, ikBold, Copy(Text, I + 2, J - I - 2));
@@ -665,10 +710,10 @@ begin
       end;
     end;
 
-    if Copy(Text, I, 2) = '__' then
+    if (Copy(Text, I, 2) = '__') and CanOpenEmphasis(Text, I, 2, True) then
     begin
       J := FindUnescaped('__', Text, I + 2);
-      if J > I then
+      if (J > I + 2) and CanCloseEmphasis(Text, J, 2, True) then
       begin
         FlushBuffer;
         AddToken(Result, ikBold, Copy(Text, I + 2, J - I - 2));
@@ -677,10 +722,11 @@ begin
       end;
     end;
 
-    if CharInSet(Text[I], ['*', '_']) then
+    if CharInSet(Text[I], ['*', '_']) and
+      CanOpenEmphasis(Text, I, 1, Text[I] = '_') then
     begin
       J := FindUnescaped(Text[I], Text, I + 1);
-      if J > I then
+      if (J > I + 1) and CanCloseEmphasis(Text, J, 1, Text[I] = '_') then
       begin
         FlushBuffer;
         AddToken(Result, ikItalic, Copy(Text, I + 1, J - I - 1));

@@ -42,8 +42,9 @@ type
     FAppendEndedWithCR: Boolean;
     FUpdatingMarkdown: Boolean;
     FReadOnly: Boolean;
-    FUndoText: string;
-    FHasUndo: Boolean;
+    FUndoStack: TStringList;
+    FRedoStack: TStringList;
+    FApplyingEdit: Boolean;
     FOnChange: TNotifyEvent;
     FOnLinkClick: TMarkDownLinkClickEvent;
     FOnScroll: TNotifyEvent;
@@ -81,7 +82,7 @@ type
     procedure SetSearchText(const Value: string);
     procedure SetScrollPosition(const Value: Integer);
     procedure UpdateScrollBar;
-    procedure WMErasBkgnd(var Message: TMessage); message WM_ERASEBKGND;
+    procedure WMEraseBkgnd(var Message: TMessage); message WM_ERASEBKGND;
     procedure WMGetDlgCode(var Message: TMessage); message WM_GETDLGCODE;
     procedure WMVScroll(var Message: TWMVScroll); message WM_VSCROLL;
     procedure WMMouseWheel(var Message: TWMMouseWheel); message WM_MOUSEWHEEL;
@@ -101,6 +102,7 @@ type
     procedure AppendMarkdownText(const Value: string);
     procedure CopySelection(PlainText: Boolean = False);
     procedure LoadFromFile(const FileName: string);
+    procedure Redo;
     procedure SelectAll;
     procedure Undo;
     property MarkdownText: string read GetMarkdownText write SetMarkdownText;
@@ -150,6 +152,7 @@ implementation
 
 uses
   System.UITypes,
+  System.Character,
   System.Math,
   System.StrUtils,
   System.SysUtils,
@@ -163,6 +166,34 @@ uses
 const
   MarkdownPadding = 14;
   ParagraphSpacing = 9;
+  MaxUndoDepth = 100;
+
+// Only shell out for URL schemes that cannot run local programs; anything
+// else in a document (file paths, custom schemes) must go through the
+// OnLinkClick event so the host application decides.
+function IsSafeLinkUrl(const Url: string): Boolean;
+begin
+  Result := StartsText('http://', Url) or StartsText('https://', Url) or
+    StartsText('mailto:', Url);
+end;
+
+procedure TrySetClipboardText(const Value: string);
+begin
+  try
+    Clipboard.AsText := Value;
+  except
+    // Another process holds the clipboard; losing the copy beats raising.
+  end;
+end;
+
+function ReadClipboardText: string;
+begin
+  try
+    Result := Clipboard.AsText;
+  except
+    Result := '';
+  end;
+end;
 
 function IsWhitespaceText(const S: string): Boolean;
 var
@@ -203,6 +234,8 @@ begin
   FCopyChunks := TMarkDownCopyChunkList.Create;
   FImageCache := TObjectDictionary<string, TPicture>.Create([doOwnsValues]);
   FImageAges := TDictionary<string, TDateTime>.Create;
+  FUndoStack := TStringList.Create;
+  FRedoStack := TStringList.Create;
   FDesiredCaretX := -1;
   FReadOnly := True;
   Font.Size := 10;
@@ -210,6 +243,8 @@ end;
 
 destructor TMarkDownViewer.Destroy;
 begin
+  FRedoStack.Free;
+  FUndoStack.Free;
   FImageAges.Free;
   FImageCache.Free;
   FCopyChunks.Free;
@@ -269,7 +304,7 @@ begin
         CopySelectionToClipboard(ssShift in Shift);
       Ord('V'):
         if not FReadOnly then
-          InsertTextAtSelection(Clipboard.AsText)
+          InsertTextAtSelection(ReadClipboardText)
         else
           Handled := False;
       Ord('X'):
@@ -280,9 +315,19 @@ begin
         end
         else
           Handled := False;
+      Ord('Y'):
+        if not FReadOnly then
+          Redo
+        else
+          Handled := False;
       Ord('Z'):
         if not FReadOnly then
-          Undo
+        begin
+          if ssShift in Shift then
+            Redo
+          else
+            Undo;
+        end
         else
           Handled := False;
       VK_INSERT:
@@ -566,13 +611,13 @@ begin
   SelEnd := Max(FSelectionAnchor, FSelectionCaret);
   if PlainText then
   begin
-    Clipboard.AsText := Copy(FSelectableText, SelStart + 1, SelEnd - SelStart);
+    TrySetClipboardText(Copy(FSelectableText, SelStart + 1, SelEnd - SelStart));
     Exit;
   end;
 
   if (SelStart = 0) and (SelEnd = Length(FSelectableText)) then
   begin
-    Clipboard.AsText := FMarkdown.Text;
+    TrySetClipboardText(FMarkdown.Text);
     Exit;
   end;
 
@@ -597,7 +642,7 @@ begin
       MarkdownSelection := MarkdownSelection + Copy(Chunk.Text, LocalStart + 1, LocalEnd - LocalStart);
   end;
 
-  Clipboard.AsText := MarkdownSelection;
+  TrySetClipboardText(MarkdownSelection);
 end;
 
 procedure TMarkDownViewer.CopySelection(PlainText: Boolean);
@@ -619,8 +664,10 @@ begin
       Exit;
     FSelectionAnchor := FSelectionCaret - 1;
     if (FSelectionCaret >= 2) and
-      (FSelectableText[FSelectionCaret] = #10) and
-      (FSelectableText[FSelectionCaret - 1] = #13) then
+      (((FSelectableText[FSelectionCaret] = #10) and
+        (FSelectableText[FSelectionCaret - 1] = #13)) or
+       (FSelectableText[FSelectionCaret].IsLowSurrogate and
+        FSelectableText[FSelectionCaret - 1].IsHighSurrogate)) then
       FSelectionAnchor := FSelectionCaret - 2;
   end
   else
@@ -629,8 +676,10 @@ begin
       Exit;
     FSelectionAnchor := FSelectionCaret + 1;
     if (FSelectionCaret + 2 <= Length(FSelectableText)) and
-      (FSelectableText[FSelectionCaret + 1] = #13) and
-      (FSelectableText[FSelectionCaret + 2] = #10) then
+      (((FSelectableText[FSelectionCaret + 1] = #13) and
+        (FSelectableText[FSelectionCaret + 2] = #10)) or
+       (FSelectableText[FSelectionCaret + 1].IsHighSurrogate and
+        FSelectableText[FSelectionCaret + 2].IsLowSurrogate)) then
       FSelectionAnchor := FSelectionCaret + 2;
   end;
   InsertTextAtSelection('');
@@ -664,14 +713,21 @@ begin
   end;
 
   SourceText := FMarkdown.Text;
-  FUndoText := SourceText;
-  FHasUndo := True;
+  FUndoStack.Add(SourceText);
+  while FUndoStack.Count > MaxUndoDepth do
+    FUndoStack.Delete(0);
+  FRedoStack.Clear;
   Delete(SourceText, SourceStart + 1, SourceEnd - SourceStart);
   Insert(Value, SourceText, SourceStart + 1);
   NewSourceCaret := SourceStart + Length(Value);
 
   SavedScrollPos := FScrollPos;
-  FMarkdown.Text := SourceText;
+  FApplyingEdit := True;
+  try
+    FMarkdown.Text := SourceText;
+  finally
+    FApplyingEdit := False;
+  end;
   FScrollPos := SavedScrollPos;
   UpdateScrollBar;
   Repaint;
@@ -1079,6 +1135,11 @@ begin
   if FUpdatingMarkdown then
     Exit;
 
+  if not FApplyingEdit then
+  begin
+    FUndoStack.Clear;
+    FRedoStack.Clear;
+  end;
   FAppendEndedWithCR := False;
   TMarkDownBlockParser.ExtractLinkReferences(FMarkdown, FLinkReferences);
   Blocks := TMarkDownBlockParser.ParseBlocks(FMarkdown);
@@ -1126,6 +1187,10 @@ begin
   inherited;
   if FSelecting then
   begin
+    if Y < 0 then
+      SetScrollPosition(FScrollPos + Y)
+    else if Y > ClientHeight then
+      SetScrollPosition(FScrollPos + (Y - ClientHeight));
     FSelectionCaret := HitTestTextPosition(X, Y);
     Invalidate;
   end;
@@ -1178,7 +1243,7 @@ begin
       begin
         if Assigned(FOnLinkClick) then
           FOnLinkClick(Self, Hit.Url)
-        else
+        else if IsSafeLinkUrl(Hit.Url) then
           ShellExecute(Handle, 'open', PChar(Hit.Url), nil, nil, SW_SHOWNORMAL);
         Break;
       end;
@@ -1256,10 +1321,18 @@ var
       if FoundAt > Length(SourceText) then
         Exit;
       Result := FoundAt - 1;
-      while (FoundAt <= Length(SourceText)) and
-        CharInSet(SourceText[FoundAt], [' ', #9, #13, #10]) do
-        Inc(FoundAt);
-      SourceScanPosition := FoundAt;
+      // An exact match consumes only itself so consecutive line breaks
+      // (blank lines in code blocks) map one atom per break; otherwise
+      // consume the whole run, e.g. a join space standing in for a CRLF.
+      if Copy(SourceText, FoundAt, Length(AText)) = AText then
+        SourceScanPosition := FoundAt + Length(AText)
+      else
+      begin
+        while (FoundAt <= Length(SourceText)) and
+          CharInSet(SourceText[FoundAt], [' ', #9, #13, #10]) do
+          Inc(FoundAt);
+        SourceScanPosition := FoundAt;
+      end;
       Exit;
     end;
 
@@ -2056,8 +2129,10 @@ begin
                   Y + 8 + (LineIndex * LineHeight), LineTextStart);
                 SetBkMode(Canvas.Handle, OldBkMode);
               end;
+              // Unconditional break so blank code lines survive in the
+              // selectable text (AddSelectableBreak collapses repeats).
               if LineIndex < Lines.Count - 1 then
-                AddSelectableBreak;
+                AddSelectableText(sLineBreak);
             end;
             Canvas.Brush.Style := bsSolid;
           finally
@@ -2227,15 +2302,42 @@ end;
 
 procedure TMarkDownViewer.Undo;
 var
-  CurrentText: string;
   SavedScrollPos: Integer;
 begin
-  if FReadOnly or not FHasUndo then
+  if FReadOnly or (FUndoStack.Count = 0) then
     Exit;
-  CurrentText := FMarkdown.Text;
+  FRedoStack.Add(FMarkdown.Text);
   SavedScrollPos := FScrollPos;
-  FMarkdown.Text := FUndoText;
-  FUndoText := CurrentText;
+  FApplyingEdit := True;
+  try
+    FMarkdown.Text := FUndoStack[FUndoStack.Count - 1];
+  finally
+    FApplyingEdit := False;
+  end;
+  FUndoStack.Delete(FUndoStack.Count - 1);
+  FScrollPos := SavedScrollPos;
+  UpdateScrollBar;
+  Repaint;
+  FSelectionAnchor := 0;
+  FSelectionCaret := 0;
+  Invalidate;
+end;
+
+procedure TMarkDownViewer.Redo;
+var
+  SavedScrollPos: Integer;
+begin
+  if FReadOnly or (FRedoStack.Count = 0) then
+    Exit;
+  FUndoStack.Add(FMarkdown.Text);
+  SavedScrollPos := FScrollPos;
+  FApplyingEdit := True;
+  try
+    FMarkdown.Text := FRedoStack[FRedoStack.Count - 1];
+  finally
+    FApplyingEdit := False;
+  end;
+  FRedoStack.Delete(FRedoStack.Count - 1);
   FScrollPos := SavedScrollPos;
   UpdateScrollBar;
   Repaint;
@@ -2269,7 +2371,7 @@ begin
   ShowScrollBar(Handle, SB_VERT, FContentHeight > ClientHeight);
 end;
 
-procedure TMarkDownViewer.WMErasBkgnd(var Message: TMessage);
+procedure TMarkDownViewer.WMEraseBkgnd(var Message: TMessage);
 begin
   Message.Result := 1;
 end;
@@ -2277,7 +2379,11 @@ end;
 procedure TMarkDownViewer.WMGetDlgCode(var Message: TMessage);
 begin
   inherited;
-  Message.Result := Message.Result or DLGC_WANTARROWS or DLGC_WANTALLKEYS;
+  // Leave Tab free for dialog navigation when read-only; while editing the
+  // control needs every key (Enter, Escape) like a multi-line edit.
+  Message.Result := Message.Result or DLGC_WANTARROWS;
+  if not FReadOnly then
+    Message.Result := Message.Result or DLGC_WANTCHARS or DLGC_WANTALLKEYS;
 end;
 
 procedure TMarkDownViewer.WMMouseWheel(var Message: TWMMouseWheel);

@@ -34,7 +34,17 @@ type
     [Test]
     procedure ParseBlocksHonorsStartLine;
     [Test]
+    procedure ParseBlocksTreatsHashWithoutSpaceAsParagraph;
+    [Test]
+    procedure ParseBlocksRequiresSeparatorForTable;
+    [Test]
     procedure ParseInlineParsesEmphasisCodeAndStrike;
+    [Test]
+    procedure ParseInlineParsesBoldItalic;
+    [Test]
+    procedure ParseInlineIgnoresUnderscoreInsideWords;
+    [Test]
+    procedure ParseInlineIgnoresSpacedAsterisks;
     [Test]
     procedure ParseInlineRespectsEscapes;
     [Test]
@@ -271,6 +281,85 @@ begin
   finally
     Blocks.Free;
     Lines.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.ParseBlocksTreatsHashWithoutSpaceAsParagraph;
+var
+  Blocks: TMarkDownBlockList;
+  Lines: TStringList;
+begin
+  Lines := TStringList.Create;
+  Blocks := nil;
+  try
+    Lines.Add('#tag');
+    Blocks := TMarkDownBlockParser.ParseBlocks(Lines);
+    Assert.AreEqual(1, Blocks.Count);
+    Assert.IsTrue(Blocks[0].Kind = bkParagraph);
+    Assert.AreEqual('#tag', Blocks[0].Text);
+  finally
+    Blocks.Free;
+    Lines.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.ParseBlocksRequiresSeparatorForTable;
+var
+  Blocks: TMarkDownBlockList;
+  Lines: TStringList;
+begin
+  Lines := TStringList.Create;
+  Blocks := nil;
+  try
+    Lines.Add('| a | b |');
+    Blocks := TMarkDownBlockParser.ParseBlocks(Lines);
+    Assert.AreEqual(1, Blocks.Count);
+    Assert.IsTrue(Blocks[0].Kind = bkParagraph);
+  finally
+    Blocks.Free;
+    Lines.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.ParseInlineParsesBoldItalic;
+var
+  Tokens: TMarkDownInlineList;
+begin
+  Tokens := TMarkDownBlockParser.ParseInline('***both***');
+  try
+    Assert.AreEqual(1, Tokens.Count);
+    Assert.IsTrue(Tokens[0].Kind = ikBoldItalic);
+    Assert.AreEqual('both', Tokens[0].Text);
+  finally
+    Tokens.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.ParseInlineIgnoresUnderscoreInsideWords;
+var
+  Tokens: TMarkDownInlineList;
+begin
+  Tokens := TMarkDownBlockParser.ParseInline('snake_case_name');
+  try
+    Assert.AreEqual(1, Tokens.Count);
+    Assert.IsTrue(Tokens[0].Kind = ikText);
+    Assert.AreEqual('snake_case_name', Tokens[0].Text);
+  finally
+    Tokens.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.ParseInlineIgnoresSpacedAsterisks;
+var
+  Tokens: TMarkDownInlineList;
+begin
+  Tokens := TMarkDownBlockParser.ParseInline('a * b * c');
+  try
+    Assert.AreEqual(1, Tokens.Count);
+    Assert.IsTrue(Tokens[0].Kind = ikText);
+    Assert.AreEqual('a * b * c', Tokens[0].Text);
+  finally
+    Tokens.Free;
   end;
 end;
 

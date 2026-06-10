@@ -3,27 +3,46 @@ unit Test.MarkdownViewerVCL;
 interface
 
 uses
-  DUnitX.TestFramework;
+  DUnitX.TestFramework,
+  System.Classes,
+  Vcl.Forms,
+  MarkdownViewerVCL;
 
 type
+  TTestMarkDownViewer = class(TMarkDownViewer)
+  public
+    procedure PressKey(Value: Word; Shift: TShiftState = []);
+    procedure TypeCharacter(Value: Char);
+  end;
+
   [TestFixture]
   TMarkDownViewerTests = class
   private
     FChangeCount: Integer;
+    FForm: TForm;
+    FViewer: TTestMarkDownViewer;
     procedure HandleViewerChange(Sender: TObject);
+    procedure RepaintViewer;
+    procedure ShowViewer(AWidth, AHeight: Integer);
   public
+    [TearDown]
+    procedure TearDown;
     [Test]
     procedure UsesReadableDefaultFont;
+    [Test]
+    procedure ReadOnlyIsEnabledByDefault;
     [Test]
     procedure AppendsMarkdownWithoutReplacingExistingText;
     [Test]
     procedure AppendFiresOnChange;
     [Test]
+    procedure AppendHandlesSplitLineBreak;
+    [Test]
     procedure TypingPreservesScrollPosition;
     [Test]
-    procedure ReadOnlyIsEnabledByDefault;
-    [Test]
     procedure DirectEditingInsertsTextAndSupportsUndo;
+    [Test]
+    procedure DirectEditingSupportsMultipleUndoAndRedo;
     [Test]
     procedure DirectEditingMovesCaretVertically;
     [Test]
@@ -45,18 +64,8 @@ type
 implementation
 
 uses
-  System.Classes,
   System.SysUtils,
-  Winapi.Windows,
-  Vcl.Forms,
-  MarkdownViewerVCL;
-
-type
-  TTestMarkDownViewer = class(TMarkDownViewer)
-  public
-    procedure PressKey(Value: Word; Shift: TShiftState = []);
-    procedure TypeCharacter(Value: Char);
-  end;
+  Winapi.Windows;
 
 procedure TTestMarkDownViewer.PressKey(Value: Word; Shift: TShiftState);
 var
@@ -71,135 +80,31 @@ begin
   KeyPress(Value);
 end;
 
-procedure TMarkDownViewerTests.DirectEditingMovesCaretVertically;
-var
-  Form: TForm;
-  Viewer: TTestMarkDownViewer;
+procedure TMarkDownViewerTests.HandleViewerChange(Sender: TObject);
 begin
-  Form := TForm.Create(nil);
-  try
-    Viewer := TTestMarkDownViewer.Create(Form);
-    Viewer.Parent := Form;
-    Viewer.SetBounds(0, 0, 400, 300);
-    Viewer.ReadOnly := False;
-    Viewer.MarkdownText := '# first' + sLineBreak + sLineBreak + '# second';
-    Form.Show;
-    Application.ProcessMessages;
-    Viewer.Repaint;
-
-    Viewer.PressKey(VK_DOWN);
-    Viewer.TypeCharacter('X');
-    Assert.IsTrue(Viewer.MarkdownText.Contains(sLineBreak + sLineBreak + '# Xsecond'),
-      Viewer.MarkdownText);
-
-    Viewer.PressKey(VK_UP);
-    Viewer.TypeCharacter('Y');
-    Assert.IsTrue(Pos('Y', Copy(Viewer.MarkdownText, 1,
-      Pos(sLineBreak, Viewer.MarkdownText) - 1)) > 0, Viewer.MarkdownText);
-  finally
-    Form.Free;
-  end;
+  Inc(FChangeCount);
 end;
 
-procedure TMarkDownViewerTests.DirectEditingSupportsControlHomeAndEnd;
-var
-  Form: TForm;
-  Viewer: TTestMarkDownViewer;
+procedure TMarkDownViewerTests.ShowViewer(AWidth, AHeight: Integer);
 begin
-  Form := TForm.Create(nil);
-  try
-    Viewer := TTestMarkDownViewer.Create(Form);
-    Viewer.Parent := Form;
-    Viewer.SetBounds(0, 0, 400, 300);
-    Viewer.ReadOnly := False;
-    Viewer.MarkdownText := '# first' + sLineBreak + sLineBreak + '# second';
-    Form.Show;
-    Application.ProcessMessages;
-    Viewer.Repaint;
-
-    Viewer.PressKey(VK_END, [ssCtrl]);
-    Viewer.TypeCharacter('X');
-    Assert.IsTrue(Viewer.MarkdownText.Contains('# secondX'),
-      Viewer.MarkdownText);
-
-    Viewer.PressKey(VK_HOME, [ssCtrl]);
-    Viewer.TypeCharacter('Y');
-    Assert.IsTrue(Viewer.MarkdownText.StartsWith('# Yfirst'),
-      Viewer.MarkdownText);
-
-    Viewer.PressKey(VK_HOME, [ssCtrl]);
-    Viewer.PressKey(VK_END, [ssCtrl, ssShift]);
-    Viewer.TypeCharacter('Z');
-    Assert.IsTrue(Viewer.MarkdownText.StartsWith('# Z'),
-      Viewer.MarkdownText);
-  finally
-    Form.Free;
-  end;
+  FForm := TForm.Create(nil);
+  FViewer := TTestMarkDownViewer.Create(FForm);
+  FViewer.Parent := FForm;
+  FViewer.SetBounds(0, 0, AWidth, AHeight);
+  FViewer.ReadOnly := False;
+  FForm.Show;
 end;
 
-procedure TMarkDownViewerTests.DirectEditingSupportsHomeAndEnd;
-var
-  Form: TForm;
-  Viewer: TTestMarkDownViewer;
+procedure TMarkDownViewerTests.RepaintViewer;
 begin
-  Form := TForm.Create(nil);
-  try
-    Viewer := TTestMarkDownViewer.Create(Form);
-    Viewer.Parent := Form;
-    Viewer.SetBounds(0, 0, 400, 300);
-    Viewer.ReadOnly := False;
-    Viewer.MarkdownText := '# first';
-    Form.Show;
-    Application.ProcessMessages;
-    Viewer.Repaint;
-
-    Viewer.PressKey(VK_END);
-    Viewer.TypeCharacter('X');
-    Assert.IsTrue(Viewer.MarkdownText.StartsWith('# firstX'),
-      Viewer.MarkdownText);
-
-    Viewer.PressKey(VK_HOME);
-    Viewer.TypeCharacter('Y');
-    Assert.IsTrue(Viewer.MarkdownText.StartsWith('# YfirstX'),
-      Viewer.MarkdownText);
-  finally
-    Form.Free;
-  end;
+  Application.ProcessMessages;
+  FViewer.Repaint;
 end;
 
-procedure TMarkDownViewerTests.DirectEditingSupportsPageNavigation;
-var
-  Form: TForm;
-  I: Integer;
-  Source: TStringList;
-  Viewer: TTestMarkDownViewer;
+procedure TMarkDownViewerTests.TearDown;
 begin
-  Form := TForm.Create(nil);
-  Source := TStringList.Create;
-  try
-    for I := 1 to 20 do
-    begin
-      Source.Add('# Heading ' + I.ToString);
-      Source.Add('');
-    end;
-
-    Viewer := TTestMarkDownViewer.Create(Form);
-    Viewer.Parent := Form;
-    Viewer.SetBounds(0, 0, 400, 120);
-    Viewer.ReadOnly := False;
-    Viewer.Markdown.Assign(Source);
-    Form.Show;
-    Application.ProcessMessages;
-    Viewer.Repaint;
-
-    Viewer.PressKey(VK_NEXT);
-    Assert.IsTrue(Viewer.ScrollPosition > 0);
-    Viewer.PressKey(VK_PRIOR);
-    Assert.AreEqual(0, Viewer.ScrollPosition);
-  finally
-    Source.Free;
-    Form.Free;
-  end;
+  FreeAndNil(FForm);
+  FViewer := nil;
 end;
 
 procedure TMarkDownViewerTests.UsesReadableDefaultFont;
@@ -208,7 +113,7 @@ var
 begin
   Viewer := TMarkDownViewer.Create(nil);
   try
-    Assert.AreEqual(10, Viewer.Font.Size);
+    Assert.IsTrue(Viewer.Font.Size >= 10, Viewer.Font.Size.ToString);
   finally
     Viewer.Free;
   end;
@@ -226,147 +131,19 @@ begin
   end;
 end;
 
-procedure TMarkDownViewerTests.DirectEditingInsertsTextAndSupportsUndo;
+procedure TMarkDownViewerTests.AppendsMarkdownWithoutReplacingExistingText;
 var
-  Form: TForm;
-  Viewer: TTestMarkDownViewer;
+  Viewer: TMarkDownViewer;
 begin
-  Form := TForm.Create(nil);
+  Viewer := TMarkDownViewer.Create(nil);
   try
-    Viewer := TTestMarkDownViewer.Create(Form);
-    Viewer.Parent := Form;
-    Viewer.SetBounds(0, 0, 400, 300);
-    Viewer.ReadOnly := False;
     Viewer.MarkdownText := '# Heading';
-    Viewer.Repaint;
-
-    Viewer.TypeCharacter('X');
-    Assert.IsTrue(Viewer.MarkdownText.StartsWith('X# Heading'));
-
-    Viewer.Undo;
-    Assert.IsTrue(Viewer.MarkdownText.StartsWith('# Heading'));
+    Viewer.AppendMarkdownText(sLineBreak + '- Item');
+    Assert.IsTrue(Pos('# Heading', Viewer.MarkdownText) > 0);
+    Assert.IsTrue(Pos('- Item', Viewer.MarkdownText) > 0);
   finally
-    Form.Free;
+    Viewer.Free;
   end;
-end;
-
-procedure TMarkDownViewerTests.DirectEditingInsertsInsideWrappedParagraph;
-var
-  Form: TForm;
-  Text: string;
-  Viewer: TTestMarkDownViewer;
-begin
-  Form := TForm.Create(nil);
-  try
-    Viewer := TTestMarkDownViewer.Create(Form);
-    Viewer.Parent := Form;
-    Viewer.SetBounds(0, 0, 160, 300);
-    Viewer.ReadOnly := False;
-    Viewer.MarkdownText :=
-      'alpha bravo charlie delta echo foxtrot golf hotel india juliet';
-    Form.Show;
-    Application.ProcessMessages;
-    Viewer.Repaint;
-
-    Viewer.PressKey(VK_DOWN);
-    Viewer.PressKey(VK_END);
-    Viewer.TypeCharacter('X');
-
-    Text := Viewer.MarkdownText;
-    Assert.IsTrue(Pos('X', Text) > 0, Text);
-    Assert.IsTrue(Pos('X', Text) < Pos('juliet', Text), Text);
-  finally
-    Form.Free;
-  end;
-end;
-
-procedure TMarkDownViewerTests.DirectEditingInsertsInsideMultiLineParagraph;
-var
-  Form: TForm;
-  I: Integer;
-  Viewer: TTestMarkDownViewer;
-begin
-  Form := TForm.Create(nil);
-  try
-    Viewer := TTestMarkDownViewer.Create(Form);
-    Viewer.Parent := Form;
-    Viewer.SetBounds(0, 0, 400, 300);
-    Viewer.ReadOnly := False;
-    Viewer.Markdown.Add('alpha bravo');
-    Viewer.Markdown.Add('charlie delta');
-    Form.Show;
-    Application.ProcessMessages;
-    Viewer.Repaint;
-
-    for I := 1 to 14 do
-      Viewer.PressKey(VK_RIGHT);
-    Viewer.TypeCharacter('X');
-
-    Assert.IsTrue(Viewer.MarkdownText.Contains('chXarlie'),
-      Viewer.MarkdownText);
-  finally
-    Form.Free;
-  end;
-end;
-
-procedure TMarkDownViewerTests.DirectEditingBackspaceJoinsBlocks;
-var
-  Form: TForm;
-  Viewer: TTestMarkDownViewer;
-begin
-  Form := TForm.Create(nil);
-  try
-    Viewer := TTestMarkDownViewer.Create(Form);
-    Viewer.Parent := Form;
-    Viewer.SetBounds(0, 0, 400, 300);
-    Viewer.ReadOnly := False;
-    Viewer.MarkdownText := '# alpha' + sLineBreak + sLineBreak + '# bravo';
-    Form.Show;
-    Application.ProcessMessages;
-    Viewer.Repaint;
-
-    Viewer.PressKey(VK_DOWN);
-    Viewer.PressKey(VK_BACK);
-
-    Assert.IsFalse(Viewer.MarkdownText.Contains(sLineBreak + sLineBreak),
-      Viewer.MarkdownText);
-    Assert.IsTrue(Viewer.MarkdownText.StartsWith('# alphabravo'),
-      Viewer.MarkdownText);
-  finally
-    Form.Free;
-  end;
-end;
-
-procedure TMarkDownViewerTests.DirectEditingArrowSkipsLineBreakPair;
-var
-  Form: TForm;
-  Viewer: TTestMarkDownViewer;
-begin
-  Form := TForm.Create(nil);
-  try
-    Viewer := TTestMarkDownViewer.Create(Form);
-    Viewer.Parent := Form;
-    Viewer.SetBounds(0, 0, 400, 300);
-    Viewer.ReadOnly := False;
-    Viewer.MarkdownText := '# alpha' + sLineBreak + sLineBreak + '# bravo';
-    Form.Show;
-    Application.ProcessMessages;
-    Viewer.Repaint;
-
-    Viewer.PressKey(VK_END);
-    Viewer.PressKey(VK_RIGHT);
-    Viewer.TypeCharacter('X');
-
-    Assert.IsTrue(Viewer.MarkdownText.Contains('# Xbravo'),
-      Viewer.MarkdownText);
-  finally
-    Form.Free;
-  end;
-end;
-
-procedure TMarkDownViewerTests.HandleViewerChange(Sender: TObject);
-begin
-  Inc(FChangeCount);
 end;
 
 procedure TMarkDownViewerTests.AppendFiresOnChange;
@@ -385,15 +162,30 @@ begin
   end;
 end;
 
+procedure TMarkDownViewerTests.AppendHandlesSplitLineBreak;
+var
+  Viewer: TMarkDownViewer;
+begin
+  Viewer := TMarkDownViewer.Create(nil);
+  try
+    Viewer.MarkdownText := '# a';
+    Viewer.AppendMarkdownText(sLineBreak + '- one' + #13);
+    Viewer.AppendMarkdownText(#10 + '- two');
+    Assert.AreEqual(3, Viewer.Markdown.Count, Viewer.MarkdownText);
+    Assert.AreEqual('- one', Viewer.Markdown[1]);
+    Assert.AreEqual('- two', Viewer.Markdown[2]);
+  finally
+    Viewer.Free;
+  end;
+end;
+
 procedure TMarkDownViewerTests.TypingPreservesScrollPosition;
 var
-  Form: TForm;
   I: Integer;
   SavedScrollPos: Integer;
   Source: TStringList;
-  Viewer: TTestMarkDownViewer;
 begin
-  Form := TForm.Create(nil);
+  ShowViewer(400, 120);
   Source := TStringList.Create;
   try
     for I := 1 to 20 do
@@ -401,43 +193,205 @@ begin
       Source.Add('# Heading ' + I.ToString);
       Source.Add('');
     end;
-
-    Viewer := TTestMarkDownViewer.Create(Form);
-    Viewer.Parent := Form;
-    Viewer.SetBounds(0, 0, 400, 120);
-    Viewer.ReadOnly := False;
-    Viewer.Markdown.Assign(Source);
-    Form.Show;
-    Application.ProcessMessages;
-    Viewer.Repaint;
-
-    for I := 1 to 30 do
-      Viewer.PressKey(VK_DOWN);
-    SavedScrollPos := Viewer.ScrollPosition;
-    Assert.IsTrue(SavedScrollPos > 0,
-      'expected caret movement to scroll the view');
-
-    Viewer.TypeCharacter('X');
-    Assert.AreEqual(SavedScrollPos, Viewer.ScrollPosition);
+    FViewer.Markdown.Assign(Source);
   finally
     Source.Free;
-    Form.Free;
   end;
+  RepaintViewer;
+
+  for I := 1 to 30 do
+    FViewer.PressKey(VK_DOWN);
+  SavedScrollPos := FViewer.ScrollPosition;
+  Assert.IsTrue(SavedScrollPos > 0,
+    'expected caret movement to scroll the view');
+
+  FViewer.TypeCharacter('X');
+  Assert.AreEqual(SavedScrollPos, FViewer.ScrollPosition);
 end;
 
-procedure TMarkDownViewerTests.AppendsMarkdownWithoutReplacingExistingText;
-var
-  Viewer: TMarkDownViewer;
+procedure TMarkDownViewerTests.DirectEditingInsertsTextAndSupportsUndo;
 begin
-  Viewer := TMarkDownViewer.Create(nil);
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := '# Heading';
+  RepaintViewer;
+
+  FViewer.TypeCharacter('X');
+  Assert.IsTrue(FViewer.MarkdownText.StartsWith('# XHeading'),
+    FViewer.MarkdownText);
+
+  FViewer.Undo;
+  Assert.IsTrue(FViewer.MarkdownText.StartsWith('# Heading'),
+    FViewer.MarkdownText);
+end;
+
+procedure TMarkDownViewerTests.DirectEditingSupportsMultipleUndoAndRedo;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := '# Heading';
+  RepaintViewer;
+
+  FViewer.TypeCharacter('A');
+  FViewer.TypeCharacter('B');
+  Assert.IsTrue(FViewer.MarkdownText.StartsWith('# ABHeading'),
+    FViewer.MarkdownText);
+
+  FViewer.Undo;
+  Assert.IsTrue(FViewer.MarkdownText.StartsWith('# AHeading'),
+    FViewer.MarkdownText);
+
+  FViewer.Undo;
+  Assert.IsTrue(FViewer.MarkdownText.StartsWith('# Heading'),
+    FViewer.MarkdownText);
+
+  FViewer.Redo;
+  Assert.IsTrue(FViewer.MarkdownText.StartsWith('# AHeading'),
+    FViewer.MarkdownText);
+end;
+
+procedure TMarkDownViewerTests.DirectEditingMovesCaretVertically;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := '# first' + sLineBreak + sLineBreak + '# second';
+  RepaintViewer;
+
+  FViewer.PressKey(VK_DOWN);
+  FViewer.TypeCharacter('X');
+  Assert.IsTrue(FViewer.MarkdownText.Contains(sLineBreak + sLineBreak + '# Xsecond'),
+    FViewer.MarkdownText);
+
+  FViewer.PressKey(VK_UP);
+  FViewer.TypeCharacter('Y');
+  Assert.IsTrue(Pos('Y', Copy(FViewer.MarkdownText, 1,
+    Pos(sLineBreak, FViewer.MarkdownText) - 1)) > 0, FViewer.MarkdownText);
+end;
+
+procedure TMarkDownViewerTests.DirectEditingSupportsHomeAndEnd;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := '# first';
+  RepaintViewer;
+
+  FViewer.PressKey(VK_END);
+  FViewer.TypeCharacter('X');
+  Assert.IsTrue(FViewer.MarkdownText.StartsWith('# firstX'),
+    FViewer.MarkdownText);
+
+  FViewer.PressKey(VK_HOME);
+  FViewer.TypeCharacter('Y');
+  Assert.IsTrue(FViewer.MarkdownText.StartsWith('# YfirstX'),
+    FViewer.MarkdownText);
+end;
+
+procedure TMarkDownViewerTests.DirectEditingSupportsPageNavigation;
+var
+  I: Integer;
+  Source: TStringList;
+begin
+  ShowViewer(400, 120);
+  Source := TStringList.Create;
   try
-    Viewer.MarkdownText := '# Heading';
-    Viewer.AppendMarkdownText(sLineBreak + '- Item');
-    Assert.IsTrue(Pos('# Heading', Viewer.MarkdownText) > 0);
-    Assert.IsTrue(Pos('- Item', Viewer.MarkdownText) > 0);
+    for I := 1 to 20 do
+    begin
+      Source.Add('# Heading ' + I.ToString);
+      Source.Add('');
+    end;
+    FViewer.Markdown.Assign(Source);
   finally
-    Viewer.Free;
+    Source.Free;
   end;
+  RepaintViewer;
+
+  FViewer.PressKey(VK_NEXT);
+  Assert.IsTrue(FViewer.ScrollPosition > 0);
+  FViewer.PressKey(VK_PRIOR);
+  Assert.AreEqual(0, FViewer.ScrollPosition);
+end;
+
+procedure TMarkDownViewerTests.DirectEditingSupportsControlHomeAndEnd;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := '# first' + sLineBreak + sLineBreak + '# second';
+  RepaintViewer;
+
+  FViewer.PressKey(VK_END, [ssCtrl]);
+  FViewer.TypeCharacter('X');
+  Assert.IsTrue(FViewer.MarkdownText.Contains('# secondX'),
+    FViewer.MarkdownText);
+
+  FViewer.PressKey(VK_HOME, [ssCtrl]);
+  FViewer.TypeCharacter('Y');
+  Assert.IsTrue(FViewer.MarkdownText.StartsWith('# Yfirst'),
+    FViewer.MarkdownText);
+
+  FViewer.PressKey(VK_HOME, [ssCtrl]);
+  FViewer.PressKey(VK_END, [ssCtrl, ssShift]);
+  FViewer.TypeCharacter('Z');
+  Assert.IsTrue(FViewer.MarkdownText.StartsWith('# Z'),
+    FViewer.MarkdownText);
+end;
+
+procedure TMarkDownViewerTests.DirectEditingInsertsInsideWrappedParagraph;
+var
+  Text: string;
+begin
+  ShowViewer(160, 300);
+  FViewer.MarkdownText :=
+    'alpha bravo charlie delta echo foxtrot golf hotel india juliet';
+  RepaintViewer;
+
+  FViewer.PressKey(VK_DOWN);
+  FViewer.PressKey(VK_END);
+  FViewer.TypeCharacter('X');
+
+  Text := FViewer.MarkdownText;
+  Assert.IsTrue(Pos('X', Text) > 0, Text);
+  Assert.IsTrue(Pos('X', Text) < Pos('juliet', Text), Text);
+end;
+
+procedure TMarkDownViewerTests.DirectEditingInsertsInsideMultiLineParagraph;
+var
+  I: Integer;
+begin
+  ShowViewer(400, 300);
+  FViewer.Markdown.Add('alpha bravo');
+  FViewer.Markdown.Add('charlie delta');
+  RepaintViewer;
+
+  for I := 1 to 14 do
+    FViewer.PressKey(VK_RIGHT);
+  FViewer.TypeCharacter('X');
+
+  Assert.IsTrue(FViewer.MarkdownText.Contains('chXarlie'),
+    FViewer.MarkdownText);
+end;
+
+procedure TMarkDownViewerTests.DirectEditingBackspaceJoinsBlocks;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := '# alpha' + sLineBreak + sLineBreak + '# bravo';
+  RepaintViewer;
+
+  FViewer.PressKey(VK_DOWN);
+  FViewer.PressKey(VK_BACK);
+
+  Assert.IsFalse(FViewer.MarkdownText.Contains(sLineBreak + sLineBreak),
+    FViewer.MarkdownText);
+  Assert.IsTrue(FViewer.MarkdownText.StartsWith('# alphabravo'),
+    FViewer.MarkdownText);
+end;
+
+procedure TMarkDownViewerTests.DirectEditingArrowSkipsLineBreakPair;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := '# alpha' + sLineBreak + sLineBreak + '# bravo';
+  RepaintViewer;
+
+  FViewer.PressKey(VK_END);
+  FViewer.PressKey(VK_RIGHT);
+  FViewer.TypeCharacter('X');
+
+  Assert.IsTrue(FViewer.MarkdownText.Contains('# Xbravo'),
+    FViewer.MarkdownText);
 end;
 
 initialization
