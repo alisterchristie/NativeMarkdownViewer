@@ -57,6 +57,16 @@ type
     [Test]
     procedure MouseDragSelectsText;
     [Test]
+    procedure TableRendersCellsAndAlignments;
+    [Test]
+    procedure ImageBlockRendersWithHeight;
+    [Test]
+    procedure InvalidImageFallsBackToAltText;
+    [Test]
+    procedure RemoteImageUrlShowsAltText;
+    [Test]
+    procedure SelectionHighlightRendersForPartialSelection;
+    [Test]
     procedure AppendsMarkdownWithoutReplacingExistingText;
     [Test]
     procedure AppendFiresOnChange;
@@ -94,6 +104,30 @@ uses
   System.UITypes,
   Vcl.Graphics,
   Winapi.Windows;
+
+function CreateTempBitmap(AWidth, AHeight: Integer): string;
+var
+  Bmp: Vcl.Graphics.TBitmap;
+begin
+  Result := TPath.Combine(TPath.GetTempPath,
+    'KaiMvImg_' + TGuid.NewGuid.ToString + '.bmp');
+  Bmp := Vcl.Graphics.TBitmap.Create;
+  try
+    Bmp.SetSize(AWidth, AHeight);
+    Bmp.Canvas.Brush.Color := clSkyBlue;
+    Bmp.Canvas.FillRect(Rect(0, 0, AWidth, AHeight));
+    Bmp.SaveToFile(Result);
+  finally
+    Bmp.Free;
+  end;
+end;
+
+function CreateCorruptImageFile: string;
+begin
+  Result := TPath.Combine(TPath.GetTempPath,
+    'KaiMvImg_' + TGuid.NewGuid.ToString + '.bmp');
+  TFile.WriteAllText(Result, 'this is not a bitmap');
+end;
 
 procedure TTestMarkDownViewer.PressKey(Value: Word; Shift: TShiftState);
 var
@@ -352,6 +386,91 @@ begin
   FViewer.DragMouse(0, 22, 10000, 22);
 
   Assert.AreEqual('alpha bravo charlie', FViewer.SelectedText(True));
+end;
+
+procedure TMarkDownViewerTests.TableRendersCellsAndAlignments;
+begin
+  ShowViewer(500, 300);
+  FViewer.MarkdownText :=
+    '| L | C | R |' + sLineBreak +
+    '| :--- | :---: | ---: |' + sLineBreak +
+    '| a | b | c |';
+  RepaintViewer;
+
+  FViewer.SelectAll;
+
+  // Cells render as tab-separated selectable text with one line per row; the
+  // separator row is skipped. This exercises DrawTable, MeasureCellHeight,
+  // and all three branches of TableAlignmentFromCell.
+  Assert.AreEqual('L'#9'C'#9'R' + sLineBreak + 'a'#9'b'#9'c',
+    FViewer.SelectedText(True).Trim);
+end;
+
+procedure TMarkDownViewerTests.ImageBlockRendersWithHeight;
+var
+  ImageFile: string;
+begin
+  // A 200x400 image is taller than the 300px viewport, so loading and laying
+  // it out must push the content height past the viewport.
+  ImageFile := CreateTempBitmap(200, 400);
+  try
+    ShowViewer(400, 300);
+    FViewer.BasePath := ExtractFilePath(ImageFile);
+    FViewer.MarkdownText := '![alt](' + ExtractFileName(ImageFile) + ')';
+    RepaintViewer;
+    Assert.IsTrue(FViewer.MaxScrollPosition > 0, 'image did not add height');
+
+    // A second paint hits the image cache rather than reloading.
+    RepaintViewer;
+    Assert.IsTrue(FViewer.MaxScrollPosition > 0);
+  finally
+    TFile.Delete(ImageFile);
+  end;
+end;
+
+procedure TMarkDownViewerTests.InvalidImageFallsBackToAltText;
+var
+  ImageFile: string;
+begin
+  // The file exists but is not a valid image, so the cached load fails and the
+  // alt text is drawn instead - a single short line that fits the viewport.
+  ImageFile := CreateCorruptImageFile;
+  try
+    ShowViewer(400, 300);
+    FViewer.BasePath := ExtractFilePath(ImageFile);
+    FViewer.MarkdownText := '![fallback alt](' + ExtractFileName(ImageFile) + ')';
+    RepaintViewer;
+    Assert.AreEqual(0, FViewer.MaxScrollPosition);
+  finally
+    TFile.Delete(ImageFile);
+  end;
+end;
+
+procedure TMarkDownViewerTests.RemoteImageUrlShowsAltText;
+begin
+  // A remote URL is never fetched; the alt text is drawn instead.
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := '![remote alt](https://example.com/image.png)';
+  RepaintViewer;
+  Assert.AreEqual(0, FViewer.MaxScrollPosition);
+end;
+
+procedure TMarkDownViewerTests.SelectionHighlightRendersForPartialSelection;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'alpha bravo charlie';
+  RepaintViewer;
+
+  // Select two characters in the middle of the first word, then repaint so the
+  // selection highlight is drawn (prefix, selected, and suffix segments).
+  FViewer.PressKey(VK_HOME, [ssCtrl]);
+  FViewer.PressKey(VK_RIGHT);
+  FViewer.PressKey(VK_RIGHT);
+  FViewer.PressKey(VK_RIGHT, [ssShift]);
+  FViewer.PressKey(VK_RIGHT, [ssShift]);
+  RepaintViewer;
+
+  Assert.AreEqual('ph', FViewer.SelectedText(True));
 end;
 
 procedure TMarkDownViewerTests.AppendsMarkdownWithoutReplacingExistingText;
