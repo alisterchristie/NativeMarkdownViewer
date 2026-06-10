@@ -6,11 +6,18 @@ Native VCL markdown viewer component for Delphi.
 
 ## Contents
 
-- `MarkdownViewerVCL.pas` - component source
+- `MarkdownViewerVCL.pas` - component source (`TMarkDownViewer`)
+- `MarkdownViewer.Model.pas` - block, inline-token, and text-run model types
+- `MarkdownViewer.Parser.pas` - markdown-to-block parsing (including tail-only streaming reparse)
+- `MarkdownViewer.Renderer.pas` - layout and GDI rendering helpers
 - `KaiMarkdownViewer.dpk` - Delphi package source
 - `KaiMarkdownViewer.dproj` - package project
+- `MarkdownGroup.groupproj` - project group (package, demo, and tests)
 - `TestApp/MarkdownViewerDemo.dproj` - VCL demo app
-- `TestApp/Demo.MainForm.pas` - demo form that creates `TMarkDownViewer` at runtime
+- `TestApp/Demo.IntroForm.pas` - launcher form for the basic and streaming demos
+- `TestApp/Demo.MainForm.pas` - editor/preview demo that creates `TMarkDownViewer` at runtime
+- `TestApp/Demo.StreamingForm.pas` - incremental streaming demo
+- `DUnitX/MarkdownViewerTests.dproj` - DUnitX test project
 
 ## Features
 
@@ -41,6 +48,9 @@ Supported rendering includes:
 - Copy selected plain text with `Ctrl+Shift+C`
 - Case-insensitive find highlighting
 - Incremental streaming with tail-only block parsing
+- Optional in-place editing of the rendered markdown source
+- Undo and redo of edits
+- Caret navigation, insertion, and deletion mapped back to the markdown source
 
 Strikethrough uses double tildes:
 
@@ -169,6 +179,32 @@ Viewer.OnLinkClick :=
   end;
 ```
 
+## Editing
+
+The viewer is read-only by default. Set `ReadOnly` to `False` to edit the
+markdown source directly in the rendered view; the caret, typing, and deletion
+are mapped back to the underlying markdown text:
+
+```pascal
+Viewer.ReadOnly := False;
+```
+
+Edits raise `OnChange`, and `Undo`/`Redo` walk the edit history:
+
+```pascal
+Viewer.OnChange :=
+  procedure(Sender: TObject)
+  begin
+    StatusBar.SimpleText := 'Modified';
+  end;
+
+Viewer.Undo;
+Viewer.Redo;
+```
+
+`OnScroll` fires when the vertical scroll position changes, which is useful for
+synchronizing an external editor or scrollbar.
+
 ## Demo Application
 
 Open and run:
@@ -177,11 +213,17 @@ Open and run:
 TestApp/MarkdownViewerDemo.dproj
 ```
 
-The demo creates `TMarkDownViewer` at runtime, so the package does not need to be installed into the IDE to try the component.
+The demo creates `TMarkDownViewer` at runtime, so the package does not need to be
+installed into the IDE to try the component. It opens an intro launcher with two
+demos:
 
-The main demo also provides file open/save/reload commands, unsaved-change
-prompts, editor clipboard commands, search highlighting, editor visibility and
-word-wrap controls, and adjustable preview/editor font sizes.
+- **Basic demo** (`Demo.MainForm`) - a side-by-side editor and preview with file
+  open/save/reload commands, unsaved-change prompts, an editable preview with
+  undo and a read-only toggle, clipboard commands, search highlighting, editor
+  visibility and word-wrap controls, and adjustable preview/editor font sizes.
+- **Streaming demo** (`Demo.StreamingForm`) - loads a text file and feeds it to
+  the viewer incrementally with `AppendMarkdownText`, with a trackbar that
+  controls how many characters arrive per tick.
 
 ## Keyboard Navigation
 

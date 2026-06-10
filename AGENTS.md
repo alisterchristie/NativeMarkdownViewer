@@ -2,14 +2,25 @@
 
 ## Project
 
-This repository contains a Delphi VCL markdown viewer component package and a small VCL demo application.
+This repository contains a Delphi VCL markdown viewer component package, a VCL demo application, and a DUnitX test project.
 
 - Package: `KaiMarkdownViewer.dproj` / `KaiMarkdownViewer.dpk`
-- Component unit: `MarkdownViewerVCL.pas`
+- Component unit: `MarkdownViewerVCL.pas` (the `TMarkDownViewer` control)
+- Supporting units:
+  - `MarkdownViewer.Model.pas` - block, inline-token, and text-run model types
+  - `MarkdownViewer.Parser.pas` - markdown-to-block parsing and streaming reparse
+  - `MarkdownViewer.Renderer.pas` - layout and GDI rendering helpers
 - Demo app: `TestApp/MarkdownViewerDemo.dproj`
-- Demo form: `TestApp/Demo.MainForm.pas`
+- Demo forms:
+  - `TestApp/Demo.IntroForm.pas` - launcher for the basic and streaming demos
+  - `TestApp/Demo.MainForm.pas` - editor/preview demo
+  - `TestApp/Demo.StreamingForm.pas` - incremental streaming demo
+- Tests: `DUnitX/MarkdownViewerTests.dproj`
+- Project group: `MarkdownGroup.groupproj` (package, demo, and tests)
 
-The component class is `TMarkDownViewer` in the `MarkdownViewerVCL` unit.
+The component class is `TMarkDownViewer` in the `MarkdownViewerVCL` unit. The unit
+splits parsing, the document model, and rendering into the three `MarkdownViewer.*`
+units; keep new parser/renderer logic in those units rather than in the control.
 
 ## RAD Studio / Kai Workflow
 
@@ -56,12 +67,22 @@ cd TestApp
 MSBuild MarkdownViewerDemo.dproj /t:Build /p:Config=Debug /p:Platform=Win32 /p:DCC_ExeOutput=.\Win32\Verify /p:DCC_DcuOutput=.\Win32\Verify
 ```
 
+Build and run the DUnitX tests:
+
+```bat
+MSBuild DUnitX\MarkdownViewerTests.dproj /t:Build /p:Config=Debug /p:Platform=Win32
+DUnitX\Win32\Debug\MarkdownViewerTests.exe --exitbehavior:Continue
+```
+
 ## Coding Notes
 
 - Keep the viewer native VCL/GDI; do not introduce WebView or browser dependencies without explicit user approval.
 - Keep `TMarkDownViewer` usable at runtime without installing the package into the IDE.
 - Preserve the demo pattern where the component is created in code.
 - Prefer small, focused parser/rendering changes over broad rewrites.
+- The control supports optional in-place editing (`ReadOnly`, `Undo`/`Redo`, `OnChange`).
+  Edits and caret motion are mapped back to the markdown source, so keep the
+  selectable-text-to-source position mapping consistent when changing parsing or layout.
 - Keep source ASCII unless there is a clear Delphi/VCL reason to use Unicode text.
 
 ## Generated Files
