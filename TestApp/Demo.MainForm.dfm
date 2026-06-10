@@ -104,6 +104,7 @@ object MainForm: TMainForm
     Width = 568
     Height = 585
     Align = alClient
+    ReadOnly = False
     Font.Charset = DEFAULT_CHARSET
     Font.Color = clWindowText
     Font.Height = -13
@@ -111,7 +112,6 @@ object MainForm: TMainForm
     Font.Style = []
     ParentColor = False
     ParentFont = False
-    ReadOnly = False
     TabOrder = 1
     OnChange = ViewerChanged
     OnLinkClick = LinkClicked
