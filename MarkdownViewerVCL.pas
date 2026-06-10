@@ -101,6 +101,7 @@ type
     destructor Destroy; override;
     procedure AppendMarkdownText(const Value: string);
     procedure CopySelection(PlainText: Boolean = False);
+    function SelectedText(PlainText: Boolean = False): string;
     procedure LoadFromFile(const FileName: string);
     procedure Redo;
     procedure SelectAll;
@@ -594,34 +595,27 @@ begin
   end;
 end;
 
-procedure TMarkDownViewer.CopySelectionToClipboard(PlainText: Boolean);
+function TMarkDownViewer.SelectedText(PlainText: Boolean): string;
 var
   Chunk: TMarkDownCopyChunk;
   ChunkIndex: Integer;
   LocalEnd: Integer;
   LocalStart: Integer;
-  MarkdownSelection: string;
   SelStart: Integer;
   SelEnd: Integer;
 begin
+  Result := '';
   if not HasSelection then
     Exit;
 
   SelStart := Min(FSelectionAnchor, FSelectionCaret);
   SelEnd := Max(FSelectionAnchor, FSelectionCaret);
   if PlainText then
-  begin
-    TrySetClipboardText(Copy(FSelectableText, SelStart + 1, SelEnd - SelStart));
-    Exit;
-  end;
+    Exit(Copy(FSelectableText, SelStart + 1, SelEnd - SelStart));
 
   if (SelStart = 0) and (SelEnd = Length(FSelectableText)) then
-  begin
-    TrySetClipboardText(FMarkdown.Text);
-    Exit;
-  end;
+    Exit(FMarkdown.Text);
 
-  MarkdownSelection := '';
   for ChunkIndex := 0 to FCopyChunks.Count - 1 do
   begin
     Chunk := FCopyChunks[ChunkIndex];
@@ -637,12 +631,17 @@ begin
       Continue;
 
     if (LocalStart = 0) and (LocalEnd = Length(Chunk.Text)) then
-      MarkdownSelection := MarkdownSelection + Chunk.MarkdownText
+      Result := Result + Chunk.MarkdownText
     else
-      MarkdownSelection := MarkdownSelection + Copy(Chunk.Text, LocalStart + 1, LocalEnd - LocalStart);
+      Result := Result + Copy(Chunk.Text, LocalStart + 1, LocalEnd - LocalStart);
   end;
+end;
 
-  TrySetClipboardText(MarkdownSelection);
+procedure TMarkDownViewer.CopySelectionToClipboard(PlainText: Boolean);
+begin
+  if not HasSelection then
+    Exit;
+  TrySetClipboardText(SelectedText(PlainText));
 end;
 
 procedure TMarkDownViewer.CopySelection(PlainText: Boolean);

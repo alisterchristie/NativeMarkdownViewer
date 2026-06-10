@@ -48,6 +48,7 @@ Supported rendering includes:
 - Mouse text selection
 - Copy selected markdown with `Ctrl+C`
 - Copy selected plain text with `Ctrl+Shift+C`
+- Read the current selection as markdown or plain text via `SelectedText`
 - Case-insensitive find highlighting
 - Incremental streaming with tail-only block parsing
 - Optional in-place editing of the rendered markdown source

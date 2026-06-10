@@ -66,7 +66,35 @@ type
     [Test]
     procedure ParseInlineEmitsHardLineBreakToken;
     [Test]
+    procedure ParseInlineLeavesUnterminatedEmphasisAsText;
+    [Test]
+    procedure ParseInlineLeavesUnterminatedCodeAsText;
+    [Test]
     procedure ExtractLinkReferencesCollectsUrls;
+    [Test]
+    procedure CountLeadingSpacesCountsSpacesAndTabs;
+    [Test]
+    procedure TrimLeftOnlyRemovesLeadingWhitespaceOnly;
+    [Test]
+    procedure StartsWithFenceRecognizesIndentedFence;
+    [Test]
+    procedure IsRuleLineAcceptsRulesAndRejectsOthers;
+    [Test]
+    procedure IsPipeTableRowDetectsPipe;
+    [Test]
+    procedure SplitTableRowSplitsCells;
+    [Test]
+    procedure TryParseImageParsesAltAndUrl;
+    [Test]
+    procedure TryParseImageRejectsNonImage;
+    [Test]
+    procedure TryParseLinkReferenceParsesNameAndUrl;
+    [Test]
+    procedure TryParseLinkReferenceDropsTitle;
+    [Test]
+    procedure TryParseListItemHandlesBulletsAndNumbers;
+    [Test]
+    procedure TryParseListItemRejectsPlainText;
   end;
 
 implementation
@@ -579,6 +607,173 @@ begin
     References.Free;
     Lines.Free;
   end;
+end;
+
+procedure TMarkDownParserTests.ParseInlineLeavesUnterminatedEmphasisAsText;
+var
+  Tokens: TMarkDownInlineList;
+begin
+  Tokens := TMarkDownBlockParser.ParseInline('**unterminated');
+  try
+    Assert.AreEqual(1, Tokens.Count);
+    Assert.IsTrue(Tokens[0].Style = []);
+    Assert.AreEqual('**unterminated', Tokens[0].Text);
+  finally
+    Tokens.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.ParseInlineLeavesUnterminatedCodeAsText;
+var
+  Tokens: TMarkDownInlineList;
+begin
+  Tokens := TMarkDownBlockParser.ParseInline('`code');
+  try
+    Assert.AreEqual(1, Tokens.Count);
+    Assert.IsFalse(Tokens[0].IsCode);
+    Assert.AreEqual('`code', Tokens[0].Text);
+  finally
+    Tokens.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.CountLeadingSpacesCountsSpacesAndTabs;
+begin
+  Assert.AreEqual(3, TMarkDownBlockParser.CountLeadingSpaces('   x'));
+  Assert.AreEqual(4, TMarkDownBlockParser.CountLeadingSpaces(#9'x'));
+  Assert.AreEqual(6, TMarkDownBlockParser.CountLeadingSpaces('  '#9'x'));
+  Assert.AreEqual(0, TMarkDownBlockParser.CountLeadingSpaces('x'));
+end;
+
+procedure TMarkDownParserTests.TrimLeftOnlyRemovesLeadingWhitespaceOnly;
+begin
+  Assert.AreEqual('abc  ', TMarkDownBlockParser.TrimLeftOnly('   abc  '));
+  Assert.AreEqual('x', TMarkDownBlockParser.TrimLeftOnly(#9#9'x'));
+  Assert.AreEqual('abc', TMarkDownBlockParser.TrimLeftOnly('abc'));
+end;
+
+procedure TMarkDownParserTests.StartsWithFenceRecognizesIndentedFence;
+begin
+  Assert.IsTrue(TMarkDownBlockParser.StartsWithFence('```'));
+  Assert.IsTrue(TMarkDownBlockParser.StartsWithFence('```pascal'));
+  Assert.IsTrue(TMarkDownBlockParser.StartsWithFence('   ```'));
+  Assert.IsFalse(TMarkDownBlockParser.StartsWithFence('``'));
+  Assert.IsFalse(TMarkDownBlockParser.StartsWithFence('text'));
+end;
+
+procedure TMarkDownParserTests.IsRuleLineAcceptsRulesAndRejectsOthers;
+begin
+  Assert.IsTrue(TMarkDownBlockParser.IsRuleLine('---'));
+  Assert.IsTrue(TMarkDownBlockParser.IsRuleLine('***'));
+  Assert.IsTrue(TMarkDownBlockParser.IsRuleLine('___'));
+  Assert.IsTrue(TMarkDownBlockParser.IsRuleLine('- - -'));
+  Assert.IsFalse(TMarkDownBlockParser.IsRuleLine('--'));
+  Assert.IsFalse(TMarkDownBlockParser.IsRuleLine('-*-'));
+  Assert.IsFalse(TMarkDownBlockParser.IsRuleLine('abc'));
+end;
+
+procedure TMarkDownParserTests.IsPipeTableRowDetectsPipe;
+begin
+  Assert.IsTrue(TMarkDownBlockParser.IsPipeTableRow('| a | b |'));
+  Assert.IsTrue(TMarkDownBlockParser.IsPipeTableRow('a | b'));
+  Assert.IsFalse(TMarkDownBlockParser.IsPipeTableRow('plain'));
+  Assert.IsFalse(TMarkDownBlockParser.IsPipeTableRow(''));
+end;
+
+procedure TMarkDownParserTests.SplitTableRowSplitsCells;
+var
+  Cells: TStringList;
+begin
+  Cells := TStringList.Create;
+  try
+    TMarkDownBlockParser.SplitTableRow('| a | b |', Cells);
+    Assert.AreEqual(2, Cells.Count);
+    Assert.AreEqual('a', Cells[0]);
+    Assert.AreEqual('b', Cells[1]);
+
+    TMarkDownBlockParser.SplitTableRow('one | two', Cells);
+    Assert.AreEqual(2, Cells.Count);
+    Assert.AreEqual('one', Cells[0]);
+    Assert.AreEqual('two', Cells[1]);
+  finally
+    Cells.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.TryParseImageParsesAltAndUrl;
+var
+  AltText: string;
+  Url: string;
+begin
+  Assert.IsTrue(TMarkDownBlockParser.TryParseImage('![alt](pic.png)', AltText, Url));
+  Assert.AreEqual('alt', AltText);
+  Assert.AreEqual('pic.png', Url);
+end;
+
+procedure TMarkDownParserTests.TryParseImageRejectsNonImage;
+var
+  AltText: string;
+  Url: string;
+begin
+  Assert.IsFalse(TMarkDownBlockParser.TryParseImage('![alt]', AltText, Url));
+  Assert.IsFalse(TMarkDownBlockParser.TryParseImage('plain text', AltText, Url));
+end;
+
+procedure TMarkDownParserTests.TryParseLinkReferenceParsesNameAndUrl;
+var
+  Name: string;
+  Url: string;
+begin
+  Assert.IsTrue(TMarkDownBlockParser.TryParseLinkReference(
+    '[ref]: https://example.com', Name, Url));
+  Assert.AreEqual('ref', Name);
+  Assert.AreEqual('https://example.com', Url);
+  Assert.IsFalse(TMarkDownBlockParser.TryParseLinkReference('not a ref', Name, Url));
+end;
+
+procedure TMarkDownParserTests.TryParseLinkReferenceDropsTitle;
+var
+  Name: string;
+  Url: string;
+begin
+  Assert.IsTrue(TMarkDownBlockParser.TryParseLinkReference(
+    '[ref]: https://example.com "Title"', Name, Url));
+  Assert.AreEqual('https://example.com', Url);
+end;
+
+procedure TMarkDownParserTests.TryParseListItemHandlesBulletsAndNumbers;
+var
+  Text: string;
+  Ordered: Boolean;
+  Number: Integer;
+  IndentLevel: Integer;
+begin
+  Assert.IsTrue(TMarkDownBlockParser.TryParseListItem('* bullet', Text,
+    Ordered, Number, IndentLevel));
+  Assert.IsFalse(Ordered);
+  Assert.AreEqual('bullet', Text);
+
+  Assert.IsTrue(TMarkDownBlockParser.TryParseListItem('+ plus', Text,
+    Ordered, Number, IndentLevel));
+  Assert.IsFalse(Ordered);
+  Assert.AreEqual('plus', Text);
+
+  Assert.IsTrue(TMarkDownBlockParser.TryParseListItem('3. third', Text,
+    Ordered, Number, IndentLevel));
+  Assert.IsTrue(Ordered);
+  Assert.AreEqual(3, Number);
+  Assert.AreEqual('third', Text);
+end;
+
+procedure TMarkDownParserTests.TryParseListItemRejectsPlainText;
+var
+  Text: string;
+  Ordered: Boolean;
+  Number: Integer;
+  IndentLevel: Integer;
+begin
+  Assert.IsFalse(TMarkDownBlockParser.TryParseListItem('plain text', Text,
+    Ordered, Number, IndentLevel));
 end;
 
 initialization

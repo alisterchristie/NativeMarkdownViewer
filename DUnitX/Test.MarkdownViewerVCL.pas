@@ -92,27 +92,8 @@ uses
   System.IOUtils,
   System.SysUtils,
   System.UITypes,
-  Vcl.Clipbrd,
   Vcl.Graphics,
   Winapi.Windows;
-
-function GetClipboardText: string;
-begin
-  try
-    Result := Clipboard.AsText;
-  except
-    Result := '';
-  end;
-end;
-
-procedure ClearClipboard;
-begin
-  try
-    Clipboard.AsText := '';
-  except
-    // Another process briefly held the clipboard; ignore.
-  end;
-end;
 
 procedure TTestMarkDownViewer.PressKey(Value: Word; Shift: TShiftState);
 var
@@ -295,13 +276,11 @@ begin
   FViewer.MarkdownText := '**bold _italic_**';
   RepaintViewer;
 
-  ClearClipboard;
   FViewer.SelectAll;
-  FViewer.CopySelection(True);
 
   // The full selection picks up the trailing block break; the run text is the
   // point of interest here.
-  Assert.AreEqual('bold italic', GetClipboardText.Trim);
+  Assert.AreEqual('bold italic', FViewer.SelectedText(True).Trim);
 end;
 
 procedure TMarkDownViewerTests.HardLineBreakCopiesAsLineBreak;
@@ -310,13 +289,11 @@ begin
   FViewer.MarkdownText := 'first  ' + sLineBreak + 'second';
   RepaintViewer;
 
-  ClearClipboard;
   FViewer.SelectAll;
-  FViewer.CopySelection(True);
 
   // Trim only removes the trailing block break, leaving the internal hard
   // break that the two trailing spaces produced.
-  Assert.AreEqual('first' + sLineBreak + 'second', GetClipboardText.Trim);
+  Assert.AreEqual('first' + sLineBreak + 'second', FViewer.SelectedText(True).Trim);
 end;
 
 procedure TMarkDownViewerTests.FullSelectionCopyMarkdownReturnsSource;
@@ -325,11 +302,9 @@ begin
   FViewer.MarkdownText := '# Heading';
   RepaintViewer;
 
-  ClearClipboard;
   FViewer.SelectAll;
-  FViewer.CopySelection(False);
 
-  Assert.AreEqual('# Heading', GetClipboardText.Trim);
+  Assert.AreEqual('# Heading', FViewer.SelectedText(False).Trim);
 end;
 
 procedure TMarkDownViewerTests.PartialSelectionCopyReconstructsBoldMarkdown;
@@ -346,10 +321,8 @@ begin
   for I := 1 to 5 do
     FViewer.PressKey(VK_RIGHT, [ssShift]);
 
-  ClearClipboard;
-  FViewer.CopySelection(False);
-
-  Assert.IsTrue(GetClipboardText.Contains('**bold**'), GetClipboardText);
+  Assert.IsTrue(FViewer.SelectedText(False).Contains('**bold**'),
+    FViewer.SelectedText(False));
 end;
 
 procedure TMarkDownViewerTests.ClickingLinkFiresOnLinkClick;
@@ -378,10 +351,7 @@ begin
   // Drag across the first line (content origin is at the padding offset).
   FViewer.DragMouse(0, 22, 10000, 22);
 
-  ClearClipboard;
-  FViewer.CopySelection(True);
-
-  Assert.AreEqual('alpha bravo charlie', GetClipboardText);
+  Assert.AreEqual('alpha bravo charlie', FViewer.SelectedText(True));
 end;
 
 procedure TMarkDownViewerTests.AppendsMarkdownWithoutReplacingExistingText;
