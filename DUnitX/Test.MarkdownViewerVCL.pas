@@ -8,11 +8,18 @@ uses
 type
   [TestFixture]
   TMarkDownViewerTests = class
+  private
+    FChangeCount: Integer;
+    procedure HandleViewerChange(Sender: TObject);
   public
     [Test]
     procedure UsesReadableDefaultFont;
     [Test]
     procedure AppendsMarkdownWithoutReplacingExistingText;
+    [Test]
+    procedure AppendFiresOnChange;
+    [Test]
+    procedure TypingPreservesScrollPosition;
     [Test]
     procedure ReadOnlyIsEnabledByDefault;
     [Test]
@@ -231,6 +238,65 @@ begin
     Viewer.Undo;
     Assert.IsTrue(Viewer.MarkdownText.StartsWith('# Heading'));
   finally
+    Form.Free;
+  end;
+end;
+
+procedure TMarkDownViewerTests.HandleViewerChange(Sender: TObject);
+begin
+  Inc(FChangeCount);
+end;
+
+procedure TMarkDownViewerTests.AppendFiresOnChange;
+var
+  Viewer: TMarkDownViewer;
+begin
+  Viewer := TMarkDownViewer.Create(nil);
+  try
+    Viewer.MarkdownText := '# Heading';
+    Viewer.OnChange := HandleViewerChange;
+    FChangeCount := 0;
+    Viewer.AppendMarkdownText(sLineBreak + '- Item');
+    Assert.AreEqual(1, FChangeCount);
+  finally
+    Viewer.Free;
+  end;
+end;
+
+procedure TMarkDownViewerTests.TypingPreservesScrollPosition;
+var
+  Form: TForm;
+  I: Integer;
+  SavedScrollPos: Integer;
+  Source: TStringList;
+  Viewer: TTestMarkDownViewer;
+begin
+  Form := TForm.Create(nil);
+  Source := TStringList.Create;
+  try
+    for I := 1 to 20 do
+    begin
+      Source.Add('# Heading ' + I.ToString);
+      Source.Add('');
+    end;
+
+    Viewer := TTestMarkDownViewer.Create(Form);
+    Viewer.Parent := Form;
+    Viewer.SetBounds(0, 0, 400, 120);
+    Viewer.ReadOnly := False;
+    Viewer.Markdown.Assign(Source);
+    Form.Show;
+    Application.ProcessMessages;
+    Viewer.Repaint;
+
+    Viewer.ScrollPosition := Viewer.MaxScrollPosition div 2;
+    SavedScrollPos := Viewer.ScrollPosition;
+    Assert.IsTrue(SavedScrollPos > 0, 'expected a scrollable document');
+
+    Viewer.TypeCharacter('X');
+    Assert.AreEqual(SavedScrollPos, Viewer.ScrollPosition);
+  finally
+    Source.Free;
     Form.Free;
   end;
 end;

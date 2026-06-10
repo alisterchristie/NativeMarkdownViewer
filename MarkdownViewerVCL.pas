@@ -35,6 +35,8 @@ type
     FQuoteBarColor: TColor;
     FSearchHighlightColor: TColor;
     FBasePath: string;
+    FImageCache: TObjectDictionary<string, TPicture>;
+    FImageAges: TDictionary<string, TDateTime>;
     FLinkReferences: TStringList;
     FSearchText: string;
     FAppendEndedWithCR: Boolean;
@@ -45,6 +47,7 @@ type
     FOnChange: TNotifyEvent;
     FOnLinkClick: TMarkDownLinkClickEvent;
     FOnScroll: TNotifyEvent;
+    function GetCachedImage(const ImagePath: string): TPicture;
     function GetMarkdown: TStrings;
     function GetMarkdownText: string;
     function GetMaxScrollPosition: Integer;
@@ -159,260 +162,6 @@ uses
 const
   MarkdownPadding = 14;
   ParagraphSpacing = 9;
-
-function TrimLeftOnly(const S: string): string;
-var
-  I: Integer;
-begin
-  I := 1;
-  while (I <= Length(S)) and CharInSet(S[I], [' ', #9]) do
-    Inc(I);
-  Result := Copy(S, I, MaxInt);
-end;
-
-function StartsWithFence(const S: string): Boolean;
-begin
-  Result := Copy(TrimLeftOnly(S), 1, 3) = '```';
-end;
-
-function IsRuleLine(const S: string): Boolean;
-var
-  I: Integer;
-  C: Char;
-  T: string;
-begin
-  T := StringReplace(Trim(S), ' ', '', [rfReplaceAll]);
-  Result := Length(T) >= 3;
-  if not Result then
-    Exit;
-
-  C := T[1];
-  Result := CharInSet(C, ['-', '*', '_']);
-  if Result then
-    for I := 2 to Length(T) do
-      if T[I] <> C then
-      begin
-        Result := False;
-        Break;
-      end;
-end;
-
-function TryParseLinkReference(const Line: string; out ReferenceName, Url: string): Boolean;
-var
-  CloseBracket: Integer;
-  Rest: string;
-  SpacePos: Integer;
-  T: string;
-begin
-  T := Trim(Line);
-  Result := (Length(T) > 4) and (T[1] = '[');
-  if not Result then
-    Exit;
-
-  CloseBracket := Pos(']:', T);
-  Result := CloseBracket > 2;
-  if not Result then
-    Exit;
-
-  ReferenceName := LowerCase(Trim(Copy(T, 2, CloseBracket - 2)));
-  Rest := Trim(Copy(T, CloseBracket + 2, MaxInt));
-  SpacePos := Pos(' ', Rest);
-  if SpacePos > 0 then
-    Rest := Copy(Rest, 1, SpacePos - 1);
-  Url := Trim(Rest);
-  Result := (ReferenceName <> '') and (Url <> '');
-end;
-
-procedure SplitTableRow(const Line: string; Cells: TStrings);
-var
-  S: string;
-  I: Integer;
-  Start: Integer;
-begin
-  Cells.Clear;
-  S := Trim(Line);
-  if (S <> '') and (S[1] = '|') then
-    Delete(S, 1, 1);
-  if (S <> '') and (S[Length(S)] = '|') then
-    Delete(S, Length(S), 1);
-
-  Start := 1;
-  for I := 1 to Length(S) do
-    if S[I] = '|' then
-    begin
-      Cells.Add(Trim(Copy(S, Start, I - Start)));
-      Start := I + 1;
-    end;
-  Cells.Add(Trim(Copy(S, Start, MaxInt)));
-end;
-
-function IsPipeTableRow(const Line: string): Boolean;
-var
-  T: string;
-begin
-  T := Trim(Line);
-  Result := (T <> '') and (Pos('|', T) > 0);
-end;
-
-function IsTableAlignCell(const Cell: string): Boolean;
-var
-  I: Integer;
-  DashCount: Integer;
-  T: string;
-begin
-  T := Trim(Cell);
-  Result := T <> '';
-  if not Result then
-    Exit;
-
-  if T[1] = ':' then
-    Delete(T, 1, 1);
-  if (T <> '') and (T[Length(T)] = ':') then
-    Delete(T, Length(T), 1);
-
-  DashCount := 0;
-  for I := 1 to Length(T) do
-    if T[I] = '-' then
-      Inc(DashCount)
-    else if not CharInSet(T[I], [' ', #9]) then
-    begin
-      Result := False;
-      Exit;
-    end;
-
-  Result := DashCount >= 3;
-end;
-
-function IsTableSeparator(const Line: string): Boolean;
-var
-  Cells: TStringList;
-  I: Integer;
-begin
-  Result := False;
-  if not IsPipeTableRow(Line) then
-    Exit;
-
-  Cells := TStringList.Create;
-  try
-    SplitTableRow(Line, Cells);
-    Result := Cells.Count > 0;
-    for I := 0 to Cells.Count - 1 do
-      if not IsTableAlignCell(Cells[I]) then
-      begin
-        Result := False;
-        Break;
-      end;
-  finally
-    Cells.Free;
-  end;
-end;
-
-function IsTableStart(Lines: TStrings; Index: Integer): Boolean;
-begin
-  Result := (Index + 1 < Lines.Count) and IsPipeTableRow(Lines[Index]) and IsTableSeparator(Lines[Index + 1]);
-end;
-
-procedure ExtractTaskMarker(var Text: string; out IsTask, TaskChecked: Boolean);
-var
-  T: string;
-begin
-  T := TrimLeftOnly(Text);
-  IsTask := (Length(T) >= 3) and (T[1] = '[') and (T[3] = ']') and
-    ((T[2] = ' ') or (UpCase(T[2]) = 'X')) and
-    ((Length(T) = 3) or CharInSet(T[4], [' ', #9]));
-  TaskChecked := IsTask and (UpCase(T[2]) = 'X');
-  if IsTask then
-    Text := Trim(Copy(T, 4, MaxInt));
-end;
-
-function CountLeadingSpaces(const S: string): Integer;
-var
-  I: Integer;
-begin
-  Result := 0;
-  for I := 1 to Length(S) do
-    if S[I] = ' ' then
-      Inc(Result)
-    else if S[I] = #9 then
-      Inc(Result, 4)
-    else
-      Break;
-end;
-
-function TryParseImage(const Line: string; out AltText, Url: string): Boolean;
-var
-  T: string;
-  CloseBracket: Integer;
-  CloseParen: Integer;
-begin
-  T := Trim(Line);
-  Result := Copy(T, 1, 2) = '![';
-  if not Result then
-    Exit;
-
-  CloseBracket := PosEx(']', T, 3);
-  Result := (CloseBracket > 2) and (CloseBracket < Length(T)) and (T[CloseBracket + 1] = '(');
-  if not Result then
-    Exit;
-
-  CloseParen := PosEx(')', T, CloseBracket + 2);
-  Result := CloseParen > CloseBracket + 2;
-  if Result then
-  begin
-    AltText := Copy(T, 3, CloseBracket - 3);
-    Url := Copy(T, CloseBracket + 2, CloseParen - CloseBracket - 2);
-  end;
-end;
-
-function TryParseHeading(const Line: string; out Text: string; out Level: Integer): Boolean;
-var
-  I: Integer;
-  T: string;
-begin
-  T := TrimLeftOnly(Line);
-  I := 1;
-  while (I <= Length(T)) and (I <= 6) and (T[I] = '#') do
-    Inc(I);
-
-  Level := I - 1;
-  Result := (Level > 0) and (I <= Length(T)) and CharInSet(T[I], [' ', #9]);
-  if Result then
-    Text := Trim(Copy(T, I + 1, MaxInt));
-end;
-
-function TryParseListItem(const Line: string; out Text: string; out Ordered: Boolean; out Number: Integer;
-  out IndentLevel: Integer): Boolean;
-var
-  I: Integer;
-  T: string;
-  Digits: string;
-begin
-  T := TrimLeftOnly(Line);
-  Result := False;
-  Ordered := False;
-  Number := 0;
-  IndentLevel := CountLeadingSpaces(Line) div 2;
-
-  if (Length(T) >= 2) and CharInSet(T[1], ['-', '*', '+']) and CharInSet(T[2], [' ', #9]) then
-  begin
-    Text := Trim(Copy(T, 3, MaxInt));
-    Result := True;
-    Exit;
-  end;
-
-  I := 1;
-  while (I <= Length(T)) and CharInSet(T[I], ['0'..'9']) do
-    Inc(I);
-
-  if (I > 1) and (I < Length(T)) and (T[I] = '.') and CharInSet(T[I + 1], [' ', #9]) then
-  begin
-    Digits := Copy(T, 1, I - 1);
-    Number := StrToIntDef(Digits, 0);
-    Text := Trim(Copy(T, I + 2, MaxInt));
-    Ordered := True;
-    Result := True;
-  end;
-end;
 
 function NewBlock(AKind: TMarkDownBlockKind; const Text: string; SourceStartLine: Integer): TMarkDownBlock;
 begin
@@ -865,6 +614,8 @@ begin
   FLinkHits := TMarkDownLinkHitList.Create;
   FTextRuns := TMarkDownTextRunList.Create;
   FCopyChunks := TMarkDownCopyChunkList.Create;
+  FImageCache := TObjectDictionary<string, TPicture>.Create([doOwnsValues]);
+  FImageAges := TDictionary<string, TDateTime>.Create;
   FDesiredCaretX := -1;
   FReadOnly := True;
   Font.Size := 10;
@@ -872,6 +623,8 @@ end;
 
 destructor TMarkDownViewer.Destroy;
 begin
+  FImageAges.Free;
+  FImageCache.Free;
   FCopyChunks.Free;
   FTextRuns.Free;
   FLinkHits.Free;
@@ -1041,6 +794,31 @@ begin
         Key := #0;
       end;
   end;
+end;
+
+function TMarkDownViewer.GetCachedImage(const ImagePath: string): TPicture;
+var
+  Age: TDateTime;
+begin
+  if not FileAge(ImagePath, Age) then
+    Age := 0;
+  if FImageCache.TryGetValue(ImagePath, Result) then
+  begin
+    if FImageAges[ImagePath] = Age then
+      Exit;
+    FImageCache.Remove(ImagePath);
+    FImageAges.Remove(ImagePath);
+  end;
+
+  // A nil entry records a failed load so the file is not retried every paint.
+  Result := TPicture.Create;
+  try
+    Result.LoadFromFile(ImagePath);
+  except
+    FreeAndNil(Result);
+  end;
+  FImageCache.Add(ImagePath, Result);
+  FImageAges.Add(ImagePath, Age);
 end;
 
 function TMarkDownViewer.GetMarkdownText: string;
@@ -1266,6 +1044,7 @@ end;
 procedure TMarkDownViewer.InsertTextAtSelection(const Value: string);
 var
   NewSourceCaret: Integer;
+  SavedScrollPos: Integer;
   SelEnd: Integer;
   SelStart: Integer;
   SourceEnd: Integer;
@@ -1296,7 +1075,10 @@ begin
   Insert(Value, SourceText, SourceStart + 1);
   NewSourceCaret := SourceStart + Length(Value);
 
+  SavedScrollPos := FScrollPos;
   FMarkdown.Text := SourceText;
+  FScrollPos := SavedScrollPos;
+  UpdateScrollBar;
   Repaint;
   FSelectionCaret := SourceToSelectablePosition(NewSourceCaret);
   FSelectionAnchor := FSelectionCaret;
@@ -1673,6 +1455,8 @@ begin
   else
     Invalidate;
   UpdateScrollBar;
+  if Assigned(FOnChange) then
+    FOnChange(Self);
 end;
 
 procedure TMarkDownViewer.LoadFromFile(const FileName: string);
@@ -2302,7 +2086,11 @@ var
   begin
     Result := Canvas.TextHeight('Wg') + 10;
     ImagePath := ResolveImagePath(Url);
-    if (ImagePath = '') or ContainsText(ImagePath, '://') or not FileExists(ImagePath) then
+    Picture := nil;
+    if (ImagePath <> '') and not ContainsText(ImagePath, '://') and FileExists(ImagePath) then
+      Picture := GetCachedImage(ImagePath);
+
+    if Picture = nil then
     begin
       Canvas.Font.Assign(Font);
       Canvas.Font.Style := [fsItalic];
@@ -2313,31 +2101,14 @@ var
       Exit;
     end;
 
-    Picture := TPicture.Create;
-    try
-      try
-        Picture.LoadFromFile(ImagePath);
-      except
-        Canvas.Font.Assign(Font);
-        Canvas.Font.Style := [fsItalic];
-        TextRect := Rect(ALeft, ATop, ALeft + AWidth, ATop + Result);
-        OldBkMode := SetBkMode(Canvas.Handle, TRANSPARENT);
-        DrawText(Canvas.Handle, PChar(AltText), Length(AltText), TextRect, DT_LEFT or DT_VCENTER or DT_SINGLELINE or DT_END_ELLIPSIS);
-        SetBkMode(Canvas.Handle, OldBkMode);
-        Exit;
-      end;
+    if (Picture.Width <= 0) or (Picture.Height <= 0) then
+      Exit;
 
-      if (Picture.Width <= 0) or (Picture.Height <= 0) then
-        Exit;
-
-      DrawWidth := Min(AWidth, Picture.Width);
-      DrawHeight := MulDiv(Picture.Height, DrawWidth, Picture.Width);
-      if (ATop + DrawHeight >= 0) and (ATop <= ClientHeight) then
-        Canvas.StretchDraw(Rect(ALeft, ATop, ALeft + DrawWidth, ATop + DrawHeight), Picture.Graphic);
-      Result := DrawHeight;
-    finally
-      Picture.Free;
-    end;
+    DrawWidth := Min(AWidth, Picture.Width);
+    DrawHeight := MulDiv(Picture.Height, DrawWidth, Picture.Width);
+    if (ATop + DrawHeight >= 0) and (ATop <= ClientHeight) then
+      Canvas.StretchDraw(Rect(ALeft, ATop, ALeft + DrawWidth, ATop + DrawHeight), Picture.Graphic);
+    Result := DrawHeight;
   end;
 
   function TableAlignmentFromCell(const Cell: string): TAlignment;
@@ -2797,12 +2568,16 @@ end;
 procedure TMarkDownViewer.Undo;
 var
   CurrentText: string;
+  SavedScrollPos: Integer;
 begin
   if FReadOnly or not FHasUndo then
     Exit;
   CurrentText := FMarkdown.Text;
+  SavedScrollPos := FScrollPos;
   FMarkdown.Text := FUndoText;
   FUndoText := CurrentText;
+  FScrollPos := SavedScrollPos;
+  UpdateScrollBar;
   Repaint;
   FSelectionAnchor := 0;
   FSelectionCaret := 0;
