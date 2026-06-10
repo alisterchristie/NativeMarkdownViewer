@@ -1554,19 +1554,6 @@ var
     end;
   end;
 
-  function NextAtom(const S: string; var Index: Integer): string;
-  var
-    Start: Integer;
-    WantSpace: Boolean;
-  begin
-    Start := Index;
-    WantSpace := CharInSet(S[Index], [' ', #9]);
-    while (Index <= Length(S)) and (CharInSet(S[Index], [' ', #9]) = WantSpace) do
-      Inc(Index);
-    Result := Copy(S, Start, Index - Start);
-    Result := StringReplace(Result, #9, '    ', [rfReplaceAll]);
-  end;
-
   function DrawInline(ATokens: TMarkDownInlineList; ALeft, ATop, AWidth: Integer; ADraw: Boolean;
     BaseStyle: TFontStyles = []; SizeDelta: Integer = 0;
     AAlignment: TAlignment = taLeftJustify; const AMarkdownLinePrefix: string = ''): Integer;
@@ -1587,26 +1574,6 @@ var
     PendingMarkdownPrefix: string;
     AtomMarkdown: string;
     TextStart: Integer;
-
-    function MarkdownForAtom(const Token: TMarkDownInlineToken; const AtomText: string): string;
-    begin
-      if Trim(AtomText) = '' then
-        Exit(AtomText);
-
-      Result := AtomText;
-      if Token.IsCode then
-        Result := '`' + Result + '`';
-      if fsStrikeOut in Token.Style then
-        Result := '~~' + Result + '~~';
-      if (fsBold in Token.Style) and (fsItalic in Token.Style) then
-        Result := '***' + Result + '***'
-      else if fsBold in Token.Style then
-        Result := '**' + Result + '**'
-      else if fsItalic in Token.Style then
-        Result := '*' + Result + '*';
-      if Token.Url <> '' then
-        Result := '[' + Result + '](' + Token.Url + ')';
-    end;
 
     procedure DrawSearchHighlights(const AText: string; TextX, TextY, TextHeight: Integer);
     var
@@ -1676,14 +1643,7 @@ var
       Available: Integer;
     begin
       Available := Max(0, AWidth - MeasureLineWidth(StartToken, StartAtom));
-      case AAlignment of
-        taCenter:
-          Result := ALeft + (Available div 2);
-        taRightJustify:
-          Result := ALeft + Available;
-      else
-        Result := ALeft;
-      end;
+      Result := ALeft + AlignmentOffset(AAlignment, Available);
     end;
 
   begin
@@ -2018,10 +1978,10 @@ begin
     case Block.Kind of
       bkHeading:
         begin
-          AssignBaseFont([fsBold], Max(1, 8 - (Block.Level * 2)));
+          AssignBaseFont([fsBold], HeadingFontSizeDelta(Block.Level));
           Tokens := InlineTokensForBlock(Block);
           TokenHeight := DrawInline(Tokens, TextLeft, Y, ContentWidth, True, [fsBold],
-            Max(1, 8 - (Block.Level * 2)), taLeftJustify, StringOfChar('#', Block.Level) + ' ');
+            HeadingFontSizeDelta(Block.Level), taLeftJustify, StringOfChar('#', Block.Level) + ' ');
           Inc(Y, TokenHeight + ParagraphSpacing + 2);
         end;
       bkQuote:
