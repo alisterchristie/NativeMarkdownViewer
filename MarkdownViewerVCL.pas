@@ -164,192 +164,6 @@ const
   MarkdownPadding = 14;
   ParagraphSpacing = 9;
 
-function NewBlock(AKind: TMarkDownBlockKind; const Text: string; SourceStartLine: Integer): TMarkDownBlock;
-begin
-  Result := TMarkDownBlock.Create;
-  Result.Kind := AKind;
-  Result.Text := Text;
-  Result.Url := '';
-  Result.Level := 0;
-  Result.IndentLevel := 0;
-  Result.Ordered := False;
-  Result.Number := 0;
-  Result.IsTask := False;
-  Result.TaskChecked := False;
-  Result.SourceStartLine := SourceStartLine;
-end;
-
-function ParseBlocks(Lines: TStrings; StartLine: Integer = 0): TMarkDownBlockList;
-var
-  I: Integer;
-  HeadingText: string;
-  ListText: string;
-  QuoteText: string;
-  CodeText: string;
-  TableText: string;
-  ImageAlt: string;
-  ImageUrl: string;
-  ParagraphText: string;
-  ParagraphStartLine: Integer;
-  ReferenceName: string;
-  ReferenceUrl: string;
-  Level: Integer;
-  IndentLevel: Integer;
-  Number: Integer;
-  Ordered: Boolean;
-  IsTask: Boolean;
-  TaskChecked: Boolean;
-  BlockStartLine: Integer;
-  Block: TMarkDownBlock;
-
-  procedure CommitParagraph;
-  begin
-    if Trim(ParagraphText) <> '' then
-      Result.Add(NewBlock(bkParagraph, Trim(ParagraphText), ParagraphStartLine));
-    ParagraphText := '';
-    ParagraphStartLine := -1;
-  end;
-
-begin
-  Result := TMarkDownBlockList.Create(True);
-  ParagraphText := '';
-  ParagraphStartLine := -1;
-  I := Max(0, StartLine);
-  while I < Lines.Count do
-  begin
-    if TMarkDownBlockParser.StartsWithFence(Lines[I]) then
-    begin
-      CommitParagraph;
-      BlockStartLine := I;
-      Inc(I);
-      CodeText := '';
-      while (I < Lines.Count) and not TMarkDownBlockParser.StartsWithFence(Lines[I]) do
-      begin
-        if CodeText <> '' then
-          CodeText := CodeText + sLineBreak;
-        CodeText := CodeText + Lines[I];
-        Inc(I);
-      end;
-      Result.Add(NewBlock(bkCodeBlock, CodeText, BlockStartLine));
-      if I < Lines.Count then
-        Inc(I);
-      Continue;
-    end;
-
-    if Trim(Lines[I]) = '' then
-    begin
-      CommitParagraph;
-      Inc(I);
-      Continue;
-    end;
-
-    if TMarkDownBlockParser.TryParseLinkReference(Lines[I], ReferenceName, ReferenceUrl) then
-    begin
-      CommitParagraph;
-      Inc(I);
-      Continue;
-    end;
-
-    if TMarkDownBlockParser.TryParseImage(Lines[I], ImageAlt, ImageUrl) then
-    begin
-      CommitParagraph;
-      Block := NewBlock(bkImage, ImageAlt, I);
-      Block.Url := ImageUrl;
-      Result.Add(Block);
-      Inc(I);
-      Continue;
-    end;
-
-    if TMarkDownBlockParser.IsTableStart(Lines, I) then
-    begin
-      CommitParagraph;
-      BlockStartLine := I;
-      TableText := Lines[I] + sLineBreak + Lines[I + 1];
-      Inc(I, 2);
-      while (I < Lines.Count) and (Trim(Lines[I]) <> '') and
-        TMarkDownBlockParser.IsPipeTableRow(Lines[I]) do
-      begin
-        TableText := TableText + sLineBreak + Lines[I];
-        Inc(I);
-      end;
-      Result.Add(NewBlock(bkTable, TableText, BlockStartLine));
-      Continue;
-    end;
-
-    if TMarkDownBlockParser.TryParseHeading(Lines[I], HeadingText, Level) then
-    begin
-      CommitParagraph;
-      Block := NewBlock(bkHeading, HeadingText, I);
-      Block.Level := Level;
-      Result.Add(Block);
-      Inc(I);
-      Continue;
-    end;
-
-    if TMarkDownBlockParser.IsRuleLine(Lines[I]) then
-    begin
-      CommitParagraph;
-      Result.Add(NewBlock(bkRule, '', I));
-      Inc(I);
-      Continue;
-    end;
-
-    if Copy(TMarkDownBlockParser.TrimLeftOnly(Lines[I]), 1, 1) = '>' then
-    begin
-      CommitParagraph;
-      BlockStartLine := I;
-      QuoteText := Trim(Copy(TMarkDownBlockParser.TrimLeftOnly(Lines[I]), 2, MaxInt));
-      Inc(I);
-      while (I < Lines.Count) and
-        (Copy(TMarkDownBlockParser.TrimLeftOnly(Lines[I]), 1, 1) = '>') do
-      begin
-        QuoteText := QuoteText + ' ' +
-          Trim(Copy(TMarkDownBlockParser.TrimLeftOnly(Lines[I]), 2, MaxInt));
-        Inc(I);
-      end;
-      Result.Add(NewBlock(bkQuote, QuoteText, BlockStartLine));
-      Continue;
-    end;
-
-    if TMarkDownBlockParser.TryParseListItem(Lines[I], ListText, Ordered,
-      Number, IndentLevel) then
-    begin
-      CommitParagraph;
-      TMarkDownBlockParser.ExtractTaskMarker(ListText, IsTask, TaskChecked);
-      Block := NewBlock(bkListItem, ListText, I);
-      Block.Ordered := Ordered;
-      Block.Number := Number;
-      Block.IndentLevel := IndentLevel;
-      Block.IsTask := IsTask;
-      Block.TaskChecked := TaskChecked;
-      Result.Add(Block);
-      Inc(I);
-      Continue;
-    end;
-
-    if ParagraphText = '' then
-      ParagraphStartLine := I
-    else
-      ParagraphText := ParagraphText + ' ';
-    ParagraphText := ParagraphText + Trim(Lines[I]);
-    Inc(I);
-  end;
-
-  CommitParagraph;
-end;
-
-procedure AddToken(Tokens: TMarkDownInlineList; AKind: TMarkDownInlineKind; const Text: string; const Url: string = '');
-var
-  Token: TMarkDownInlineToken;
-begin
-  if Text = '' then
-    Exit;
-  Token.Kind := AKind;
-  Token.Text := Text;
-  Token.Url := Url;
-  Tokens.Add(Token);
-end;
-
 function IsWhitespaceText(const S: string): Boolean;
 var
   I: Integer;
@@ -358,244 +172,6 @@ begin
   for I := 1 to Length(S) do
     if not CharInSet(S[I], [' ', #9, #13, #10]) then
       Exit(False);
-end;
-
-function IsEscapedAt(const Text: string; Index: Integer): Boolean;
-var
-  I: Integer;
-  SlashCount: Integer;
-begin
-  SlashCount := 0;
-  I := Index - 1;
-  while (I >= 1) and (Text[I] = '\') do
-  begin
-    Inc(SlashCount);
-    Dec(I);
-  end;
-  Result := Odd(SlashCount);
-end;
-
-function FindUnescaped(const Needle, Text: string; StartPos: Integer): Integer;
-begin
-  Result := PosEx(Needle, Text, StartPos);
-  while (Result > 0) and IsEscapedAt(Text, Result) do
-    Result := PosEx(Needle, Text, Result + Length(Needle));
-end;
-
-function IsAutoLinkBoundary(const Text: string; Index: Integer): Boolean;
-begin
-  Result := (Index = 1) or CharInSet(Text[Index - 1], [' ', #9, '(', '[', '{', '<', '>', '"', '''']);
-end;
-
-function TryReadAutoLink(const Text: string; Index: Integer; out DisplayText, Url: string;
-  out NextIndex: Integer): Boolean;
-var
-  I: Integer;
-  HasScheme: Boolean;
-begin
-  Result := False;
-  DisplayText := '';
-  Url := '';
-  NextIndex := Index;
-
-  if (Text[Index] = '<') and
-    (StartsText('http://', Copy(Text, Index + 1, MaxInt)) or StartsText('https://', Copy(Text, Index + 1, MaxInt))) then
-  begin
-    I := PosEx('>', Text, Index + 1);
-    if I > Index + 1 then
-    begin
-      DisplayText := Copy(Text, Index + 1, I - Index - 1);
-      Url := DisplayText;
-      NextIndex := I + 1;
-      Exit(True);
-    end;
-  end;
-
-  if not IsAutoLinkBoundary(Text, Index) then
-    Exit;
-
-  HasScheme := StartsText('http://', Copy(Text, Index, MaxInt)) or
-    StartsText('https://', Copy(Text, Index, MaxInt));
-  if not HasScheme and not StartsText('www.', Copy(Text, Index, MaxInt)) then
-    Exit;
-
-  I := Index;
-  while (I <= Length(Text)) and not CharInSet(Text[I], [' ', #9, #13, #10, '<', '>', '"']) do
-    Inc(I);
-  DisplayText := Copy(Text, Index, I - Index);
-  while (DisplayText <> '') and CharInSet(DisplayText[Length(DisplayText)], ['.', ',', ';', ':', '!', '?']) do
-  begin
-    Dec(I);
-    Delete(DisplayText, Length(DisplayText), 1);
-  end;
-  if DisplayText = '' then
-    Exit;
-
-  if HasScheme then
-    Url := DisplayText
-  else
-    Url := 'https://' + DisplayText;
-  NextIndex := I;
-  Result := True;
-end;
-
-procedure ExtractLinkReferences(Lines: TStrings; References: TStrings);
-var
-  I: Integer;
-  ReferenceName: string;
-  ReferenceUrl: string;
-begin
-  References.BeginUpdate;
-  try
-    References.Clear;
-    for I := 0 to Lines.Count - 1 do
-      if TMarkDownBlockParser.TryParseLinkReference(Lines[I], ReferenceName,
-        ReferenceUrl) then
-        References.Values[ReferenceName] := ReferenceUrl;
-  finally
-    References.EndUpdate;
-  end;
-end;
-
-function ParseInline(const Text: string; References: TStrings = nil): TMarkDownInlineList;
-var
-  I: Integer;
-  J: Integer;
-  K: Integer;
-  NextIndex: Integer;
-  Buffer: string;
-  LinkText: string;
-  ReferenceName: string;
-  LinkUrl: string;
-
-  procedure FlushBuffer;
-  begin
-    AddToken(Result, ikText, Buffer);
-    Buffer := '';
-  end;
-
-begin
-  Result := TMarkDownInlineList.Create;
-  Buffer := '';
-  I := 1;
-  while I <= Length(Text) do
-  begin
-    if (Text[I] = '\') and (I < Length(Text)) and
-      CharInSet(Text[I + 1], ['\', '`', '*', '_', '{', '}', '[', ']', '(', ')', '#', '+', '-', '.', '!', '>', '~', '|']) then
-    begin
-      Buffer := Buffer + Text[I + 1];
-      Inc(I, 2);
-      Continue;
-    end;
-
-    if TryReadAutoLink(Text, I, LinkText, LinkUrl, NextIndex) then
-    begin
-      FlushBuffer;
-      AddToken(Result, ikLink, LinkText, LinkUrl);
-      I := NextIndex;
-      Continue;
-    end;
-
-    if Text[I] = '`' then
-    begin
-      J := FindUnescaped('`', Text, I + 1);
-      if J > I then
-      begin
-        FlushBuffer;
-        AddToken(Result, ikCode, Copy(Text, I + 1, J - I - 1));
-        I := J + 1;
-        Continue;
-      end;
-    end;
-
-    if Copy(Text, I, 2) = '~~' then
-    begin
-      J := FindUnescaped('~~', Text, I + 2);
-      if J > I then
-      begin
-        FlushBuffer;
-        AddToken(Result, ikStrike, Copy(Text, I + 2, J - I - 2));
-        I := J + 2;
-        Continue;
-      end;
-    end;
-
-    if Copy(Text, I, 2) = '**' then
-    begin
-      J := FindUnescaped('**', Text, I + 2);
-      if J > I then
-      begin
-        FlushBuffer;
-        AddToken(Result, ikBold, Copy(Text, I + 2, J - I - 2));
-        I := J + 2;
-        Continue;
-      end;
-    end;
-
-    if Copy(Text, I, 2) = '__' then
-    begin
-      J := FindUnescaped('__', Text, I + 2);
-      if J > I then
-      begin
-        FlushBuffer;
-        AddToken(Result, ikBold, Copy(Text, I + 2, J - I - 2));
-        I := J + 2;
-        Continue;
-      end;
-    end;
-
-    if CharInSet(Text[I], ['*', '_']) then
-    begin
-      J := FindUnescaped(Text[I], Text, I + 1);
-      if J > I then
-      begin
-        FlushBuffer;
-        AddToken(Result, ikItalic, Copy(Text, I + 1, J - I - 1));
-        I := J + 1;
-        Continue;
-      end;
-    end;
-
-    if Text[I] = '[' then
-    begin
-      J := FindUnescaped(']', Text, I + 1);
-      if (J > I) and (J < Length(Text)) and (Text[J + 1] = '(') then
-      begin
-        K := FindUnescaped(')', Text, J + 2);
-        if K > J then
-        begin
-          FlushBuffer;
-          AddToken(Result, ikLink, Copy(Text, I + 1, J - I - 1), Copy(Text, J + 2, K - J - 2));
-          I := K + 1;
-          Continue;
-        end;
-      end;
-
-      if (References <> nil) and (J > I) and (J < Length(Text)) and (Text[J + 1] = '[') then
-      begin
-        K := FindUnescaped(']', Text, J + 2);
-        if K > J then
-        begin
-          LinkText := Copy(Text, I + 1, J - I - 1);
-          ReferenceName := Trim(Copy(Text, J + 2, K - J - 2));
-          if ReferenceName = '' then
-            ReferenceName := LinkText;
-          LinkUrl := References.Values[LowerCase(ReferenceName)];
-          if LinkUrl <> '' then
-          begin
-            FlushBuffer;
-            AddToken(Result, ikLink, LinkText, LinkUrl);
-            I := K + 1;
-            Continue;
-          end;
-        end;
-      end;
-    end;
-
-    Buffer := Buffer + Text[I];
-    Inc(I);
-  end;
-  FlushBuffer;
 end;
 
 procedure Register;
@@ -1455,13 +1031,13 @@ begin
   end;
 
   OldReferences := FLinkReferences.Text;
-  ExtractLinkReferences(FMarkdown, FLinkReferences);
+  TMarkDownBlockParser.ExtractLinkReferences(FMarkdown, FLinkReferences);
   if FLinkReferences.Text <> OldReferences then
     ClearInlineTokenCaches;
   while (FBlocks.Count > 0) and (FBlocks.Last.SourceStartLine >= ReparseLine) do
     FBlocks.Delete(FBlocks.Count - 1);
 
-  NewBlocks := ParseBlocks(FMarkdown, ReparseLine);
+  NewBlocks := TMarkDownBlockParser.ParseBlocks(FMarkdown, ReparseLine);
   try
     while NewBlocks.Count > 0 do
     begin
@@ -1504,8 +1080,8 @@ begin
     Exit;
 
   FAppendEndedWithCR := False;
-  ExtractLinkReferences(FMarkdown, FLinkReferences);
-  Blocks := ParseBlocks(FMarkdown);
+  TMarkDownBlockParser.ExtractLinkReferences(FMarkdown, FLinkReferences);
+  Blocks := TMarkDownBlockParser.ParseBlocks(FMarkdown);
   FBlocks.Free;
   FBlocks := Blocks;
   FScrollPos := 0;
@@ -1639,7 +1215,7 @@ var
   function InlineTokensForBlock(ABlock: TMarkDownBlock): TMarkDownInlineList;
   begin
     if ABlock.InlineTokens = nil then
-      ABlock.InlineTokens := ParseInline(ABlock.Text, FLinkReferences);
+      ABlock.InlineTokens := TMarkDownBlockParser.ParseInline(ABlock.Text, FLinkReferences);
     Result := ABlock.InlineTokens;
   end;
 
@@ -2217,7 +1793,7 @@ var
         CellStyle := [fsBold]
       else
         CellStyle := [];
-      CellTokens := ParseInline(AText, FLinkReferences);
+      CellTokens := TMarkDownBlockParser.ParseInline(AText, FLinkReferences);
       try
         Result := DrawInline(CellTokens, 0, 0, Max(1, ACellWidth - 16), False, CellStyle) + 14;
       finally
@@ -2317,7 +1893,7 @@ var
           else
             CellText := '';
 
-          CellTokens := ParseInline(CellText, FLinkReferences);
+          CellTokens := TMarkDownBlockParser.ParseInline(CellText, FLinkReferences);
           try
             if SourceIndex = 0 then
               DrawInline(CellTokens, CellRect.Left + 8, CellRect.Top + 5,
