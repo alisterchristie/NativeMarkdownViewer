@@ -38,9 +38,17 @@ type
     [Test]
     procedure ParseBlocksRequiresSeparatorForTable;
     [Test]
+    procedure ParseBlocksAddsHardBreakForTrailingSpaces;
+    [Test]
+    procedure ParseBlocksAddsHardBreakForTrailingBackslash;
+    [Test]
     procedure ParseInlineParsesEmphasisCodeAndStrike;
     [Test]
     procedure ParseInlineParsesBoldItalic;
+    [Test]
+    procedure ParseInlineNestsEmphasis;
+    [Test]
+    procedure ParseInlineStylesLinkText;
     [Test]
     procedure ParseInlineIgnoresUnderscoreInsideWords;
     [Test]
@@ -50,9 +58,13 @@ type
     [Test]
     procedure ParseInlineParsesInlineLink;
     [Test]
+    procedure ParseInlineStripsLinkTitle;
+    [Test]
     procedure ParseInlineResolvesReferenceLink;
     [Test]
     procedure ParseInlineDetectsAutoLink;
+    [Test]
+    procedure ParseInlineEmitsHardLineBreakToken;
     [Test]
     procedure ExtractLinkReferencesCollectsUrls;
   end;
@@ -62,6 +74,7 @@ implementation
 uses
   System.Classes,
   System.SysUtils,
+  Vcl.Graphics,
   MarkdownViewer.Model,
   MarkdownViewer.Parser;
 
@@ -321,6 +334,45 @@ begin
   end;
 end;
 
+procedure TMarkDownParserTests.ParseBlocksAddsHardBreakForTrailingSpaces;
+var
+  Blocks: TMarkDownBlockList;
+  Lines: TStringList;
+begin
+  Lines := TStringList.Create;
+  Blocks := nil;
+  try
+    Lines.Add('first line  ');
+    Lines.Add('second line');
+    Blocks := TMarkDownBlockParser.ParseBlocks(Lines);
+    Assert.AreEqual(1, Blocks.Count);
+    Assert.IsTrue(Blocks[0].Kind = bkParagraph);
+    Assert.AreEqual('first line'#10'second line', Blocks[0].Text);
+  finally
+    Blocks.Free;
+    Lines.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.ParseBlocksAddsHardBreakForTrailingBackslash;
+var
+  Blocks: TMarkDownBlockList;
+  Lines: TStringList;
+begin
+  Lines := TStringList.Create;
+  Blocks := nil;
+  try
+    Lines.Add('first line\');
+    Lines.Add('second line');
+    Blocks := TMarkDownBlockParser.ParseBlocks(Lines);
+    Assert.AreEqual(1, Blocks.Count);
+    Assert.AreEqual('first line'#10'second line', Blocks[0].Text);
+  finally
+    Blocks.Free;
+    Lines.Free;
+  end;
+end;
+
 procedure TMarkDownParserTests.ParseInlineParsesBoldItalic;
 var
   Tokens: TMarkDownInlineList;
@@ -328,7 +380,7 @@ begin
   Tokens := TMarkDownBlockParser.ParseInline('***both***');
   try
     Assert.AreEqual(1, Tokens.Count);
-    Assert.IsTrue(Tokens[0].Kind = ikBoldItalic);
+    Assert.IsTrue(Tokens[0].Style = [fsBold, fsItalic]);
     Assert.AreEqual('both', Tokens[0].Text);
   finally
     Tokens.Free;
@@ -342,7 +394,7 @@ begin
   Tokens := TMarkDownBlockParser.ParseInline('snake_case_name');
   try
     Assert.AreEqual(1, Tokens.Count);
-    Assert.IsTrue(Tokens[0].Kind = ikText);
+    Assert.IsTrue(Tokens[0].Style = []);
     Assert.AreEqual('snake_case_name', Tokens[0].Text);
   finally
     Tokens.Free;
@@ -356,7 +408,7 @@ begin
   Tokens := TMarkDownBlockParser.ParseInline('a * b * c');
   try
     Assert.AreEqual(1, Tokens.Count);
-    Assert.IsTrue(Tokens[0].Kind = ikText);
+    Assert.IsTrue(Tokens[0].Style = []);
     Assert.AreEqual('a * b * c', Tokens[0].Text);
   finally
     Tokens.Free;
@@ -370,16 +422,50 @@ begin
   Tokens := TMarkDownBlockParser.ParseInline('a **b** *c* `d` ~~e~~');
   try
     Assert.AreEqual(8, Tokens.Count);
-    Assert.IsTrue(Tokens[0].Kind = ikText);
+    Assert.IsTrue(Tokens[0].Style = []);
     Assert.AreEqual('a ', Tokens[0].Text);
-    Assert.IsTrue(Tokens[1].Kind = ikBold);
+    Assert.IsTrue(Tokens[1].Style = [fsBold]);
     Assert.AreEqual('b', Tokens[1].Text);
-    Assert.IsTrue(Tokens[3].Kind = ikItalic);
+    Assert.IsTrue(Tokens[3].Style = [fsItalic]);
     Assert.AreEqual('c', Tokens[3].Text);
-    Assert.IsTrue(Tokens[5].Kind = ikCode);
+    Assert.IsTrue(Tokens[5].IsCode);
     Assert.AreEqual('d', Tokens[5].Text);
-    Assert.IsTrue(Tokens[7].Kind = ikStrike);
+    Assert.IsTrue(Tokens[7].Style = [fsStrikeOut]);
     Assert.AreEqual('e', Tokens[7].Text);
+  finally
+    Tokens.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.ParseInlineNestsEmphasis;
+var
+  Tokens: TMarkDownInlineList;
+begin
+  Tokens := TMarkDownBlockParser.ParseInline('**bold _and italic_**');
+  try
+    Assert.AreEqual(2, Tokens.Count);
+    Assert.IsTrue(Tokens[0].Style = [fsBold]);
+    Assert.AreEqual('bold ', Tokens[0].Text);
+    Assert.IsTrue(Tokens[1].Style = [fsBold, fsItalic]);
+    Assert.AreEqual('and italic', Tokens[1].Text);
+  finally
+    Tokens.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.ParseInlineStylesLinkText;
+var
+  Tokens: TMarkDownInlineList;
+begin
+  Tokens := TMarkDownBlockParser.ParseInline('[**bold** link](https://example.com)');
+  try
+    Assert.AreEqual(2, Tokens.Count);
+    Assert.IsTrue(Tokens[0].Style = [fsBold]);
+    Assert.AreEqual('bold', Tokens[0].Text);
+    Assert.AreEqual('https://example.com', Tokens[0].Url);
+    Assert.IsTrue(Tokens[1].Style = []);
+    Assert.AreEqual(' link', Tokens[1].Text);
+    Assert.AreEqual('https://example.com', Tokens[1].Url);
   finally
     Tokens.Free;
   end;
@@ -392,7 +478,7 @@ begin
   Tokens := TMarkDownBlockParser.ParseInline('\*not bold\*');
   try
     Assert.AreEqual(1, Tokens.Count);
-    Assert.IsTrue(Tokens[0].Kind = ikText);
+    Assert.IsTrue(Tokens[0].Style = []);
     Assert.AreEqual('*not bold*', Tokens[0].Text);
   finally
     Tokens.Free;
@@ -406,7 +492,20 @@ begin
   Tokens := TMarkDownBlockParser.ParseInline('[title](https://example.com)');
   try
     Assert.AreEqual(1, Tokens.Count);
-    Assert.IsTrue(Tokens[0].Kind = ikLink);
+    Assert.AreEqual('title', Tokens[0].Text);
+    Assert.AreEqual('https://example.com', Tokens[0].Url);
+  finally
+    Tokens.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.ParseInlineStripsLinkTitle;
+var
+  Tokens: TMarkDownInlineList;
+begin
+  Tokens := TMarkDownBlockParser.ParseInline('[title](https://example.com "tip")');
+  try
+    Assert.AreEqual(1, Tokens.Count);
     Assert.AreEqual('title', Tokens[0].Text);
     Assert.AreEqual('https://example.com', Tokens[0].Url);
   finally
@@ -425,7 +524,6 @@ begin
     References.Values['ref'] := 'https://example.com';
     Tokens := TMarkDownBlockParser.ParseInline('[title][ref]', References);
     Assert.AreEqual(1, Tokens.Count);
-    Assert.IsTrue(Tokens[0].Kind = ikLink);
     Assert.AreEqual('title', Tokens[0].Text);
     Assert.AreEqual('https://example.com', Tokens[0].Url);
   finally
@@ -441,10 +539,24 @@ begin
   Tokens := TMarkDownBlockParser.ParseInline('visit https://example.com today.');
   try
     Assert.AreEqual(3, Tokens.Count);
-    Assert.IsTrue(Tokens[1].Kind = ikLink);
     Assert.AreEqual('https://example.com', Tokens[1].Url);
-    Assert.IsTrue(Tokens[2].Kind = ikText);
+    Assert.IsFalse(Tokens[2].LineBreak);
     Assert.AreEqual(' today.', Tokens[2].Text);
+  finally
+    Tokens.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.ParseInlineEmitsHardLineBreakToken;
+var
+  Tokens: TMarkDownInlineList;
+begin
+  Tokens := TMarkDownBlockParser.ParseInline('foo'#10'bar');
+  try
+    Assert.AreEqual(3, Tokens.Count);
+    Assert.AreEqual('foo', Tokens[0].Text);
+    Assert.IsTrue(Tokens[1].LineBreak);
+    Assert.AreEqual('bar', Tokens[2].Text);
   finally
     Tokens.Free;
   end;

@@ -11,13 +11,16 @@ type
   TMarkDownBlockKind = (bkParagraph, bkHeading, bkQuote, bkListItem,
     bkCodeBlock, bkRule, bkTable, bkImage);
 
-  TMarkDownInlineKind = (ikText, ikBold, ikItalic, ikBoldItalic, ikCode,
-    ikLink, ikStrike);
-
+  // An inline run carries combinable emphasis (Style) so spans can nest,
+  // e.g. bold containing italic, or a link whose text is bold. IsCode marks a
+  // monospace code span, Url (when non-empty) marks the run as part of a link,
+  // and LineBreak marks a hard line break (Text is empty for break tokens).
   TMarkDownInlineToken = record
-    Kind: TMarkDownInlineKind;
     Text: string;
+    Style: TFontStyles;
+    IsCode: Boolean;
     Url: string;
+    LineBreak: Boolean;
   end;
 
   TMarkDownInlineList = TList<TMarkDownInlineToken>;

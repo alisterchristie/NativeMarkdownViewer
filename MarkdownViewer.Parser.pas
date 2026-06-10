@@ -43,7 +43,8 @@ uses
   System.Character,
   System.Math,
   System.StrUtils,
-  System.SysUtils;
+  System.SysUtils,
+  Vcl.Graphics;
 
 class function TMarkDownBlockParser.TrimLeftOnly(const S: string): string;
 var
@@ -323,6 +324,36 @@ begin
   end;
 end;
 
+// Returns the paragraph text contributed by a source line and reports whether
+// that line ends with a hard line break (two or more trailing spaces, or a
+// single unescaped trailing backslash). A break backslash is stripped.
+function ParagraphLineText(const Line: string; out HardBreak: Boolean): string;
+var
+  Backslashes: Integer;
+  P: Integer;
+begin
+  HardBreak := (Length(Line) >= 2) and (Line[Length(Line)] = ' ') and
+    (Line[Length(Line) - 1] = ' ');
+
+  Result := Trim(Line);
+
+  if not HardBreak and (Result <> '') and (Result[Length(Result)] = '\') then
+  begin
+    Backslashes := 0;
+    P := Length(Result);
+    while (P >= 1) and (Result[P] = '\') do
+    begin
+      Inc(Backslashes);
+      Dec(P);
+    end;
+    if Odd(Backslashes) then
+    begin
+      HardBreak := True;
+      Result := TrimRight(Copy(Result, 1, Length(Result) - 1));
+    end;
+  end;
+end;
+
 function NewBlock(AKind: TMarkDownBlockKind; const Text: string;
   SourceStartLine: Integer): TMarkDownBlock;
 begin
@@ -352,6 +383,9 @@ var
   ImageUrl: string;
   ParagraphText: string;
   ParagraphStartLine: Integer;
+  ParagraphLine: string;
+  PrevHardBreak: Boolean;
+  CurrentHardBreak: Boolean;
   ReferenceName: string;
   ReferenceUrl: string;
   Level: Integer;
@@ -369,12 +403,14 @@ var
       Result.Add(NewBlock(bkParagraph, Trim(ParagraphText), ParagraphStartLine));
     ParagraphText := '';
     ParagraphStartLine := -1;
+    PrevHardBreak := False;
   end;
 
 begin
   Result := TMarkDownBlockList.Create(True);
   ParagraphText := '';
   ParagraphStartLine := -1;
+  PrevHardBreak := False;
   I := Max(0, StartLine);
   while I < Lines.Count do
   begin
@@ -487,27 +523,42 @@ begin
       Continue;
     end;
 
+    ParagraphLine := ParagraphLineText(Lines[I], CurrentHardBreak);
     if ParagraphText = '' then
       ParagraphStartLine := I
+    else if PrevHardBreak then
+      ParagraphText := ParagraphText + #10
     else
       ParagraphText := ParagraphText + ' ';
-    ParagraphText := ParagraphText + Trim(Lines[I]);
+    ParagraphText := ParagraphText + ParagraphLine;
+    PrevHardBreak := CurrentHardBreak;
     Inc(I);
   end;
 
   CommitParagraph;
 end;
 
-procedure AddToken(Tokens: TMarkDownInlineList; AKind: TMarkDownInlineKind;
-  const Text: string; const Url: string = '');
+procedure AddRun(Tokens: TMarkDownInlineList; const Text: string;
+  Style: TFontStyles; IsCode: Boolean; const Url: string);
 var
   Token: TMarkDownInlineToken;
 begin
   if Text = '' then
     Exit;
-  Token.Kind := AKind;
+  Token := Default(TMarkDownInlineToken);
   Token.Text := Text;
+  Token.Style := Style;
+  Token.IsCode := IsCode;
   Token.Url := Url;
+  Tokens.Add(Token);
+end;
+
+procedure AddLineBreak(Tokens: TMarkDownInlineList);
+var
+  Token: TMarkDownInlineToken;
+begin
+  Token := Default(TMarkDownInlineToken);
+  Token.LineBreak := True;
   Tokens.Add(Token);
 end;
 
@@ -617,8 +668,22 @@ begin
   Result := True;
 end;
 
-class function TMarkDownBlockParser.ParseInline(const Text: string;
-  References: TStrings): TMarkDownInlineList;
+// Strips an optional "title" from a link destination, e.g. (url "title").
+function LinkDestination(const Inside: string): string;
+var
+  SpacePos: Integer;
+begin
+  Result := Trim(Inside);
+  SpacePos := Pos(' ', Result);
+  if SpacePos > 0 then
+    Result := Trim(Copy(Result, 1, SpacePos - 1));
+end;
+
+// Recursively splits Text into styled runs. BaseStyle and BaseUrl are inherited
+// from any enclosing emphasis or link span, so nested formatting accumulates
+// (e.g. bold text inside a link keeps both the bold style and the link url).
+procedure ParseRuns(const Text: string; References: TStrings;
+  BaseStyle: TFontStyles; const BaseUrl: string; Tokens: TMarkDownInlineList);
 var
   I: Integer;
   J: Integer;
@@ -632,12 +697,11 @@ var
 
   procedure FlushBuffer;
   begin
-    AddToken(Result, ikText, Buffer);
+    AddRun(Tokens, Buffer, BaseStyle, False, BaseUrl);
     Buffer := '';
   end;
 
 begin
-  Result := TMarkDownInlineList.Create;
   Buffer := '';
   I := 1;
   while I <= Length(Text) do
@@ -650,10 +714,20 @@ begin
       Continue;
     end;
 
+    // A bare line feed marks a hard line break introduced by the block parser
+    // (two trailing spaces or a trailing backslash in the source).
+    if Text[I] = #10 then
+    begin
+      FlushBuffer;
+      AddLineBreak(Tokens);
+      Inc(I);
+      Continue;
+    end;
+
     if TryReadAutoLink(Text, I, LinkText, LinkUrl, NextIndex) then
     begin
       FlushBuffer;
-      AddToken(Result, ikLink, LinkText, LinkUrl);
+      AddRun(Tokens, LinkText, BaseStyle, False, LinkUrl);
       I := NextIndex;
       Continue;
     end;
@@ -664,7 +738,7 @@ begin
       if J > I then
       begin
         FlushBuffer;
-        AddToken(Result, ikCode, Copy(Text, I + 1, J - I - 1));
+        AddRun(Tokens, Copy(Text, I + 1, J - I - 1), BaseStyle, True, BaseUrl);
         I := J + 1;
         Continue;
       end;
@@ -679,7 +753,8 @@ begin
         if (J > I + 3) and CanCloseEmphasis(Text, J, 3, Marker = '___') then
         begin
           FlushBuffer;
-          AddToken(Result, ikBoldItalic, Copy(Text, I + 3, J - I - 3));
+          ParseRuns(Copy(Text, I + 3, J - I - 3), References,
+            BaseStyle + [fsBold, fsItalic], BaseUrl, Tokens);
           I := J + 3;
           Continue;
         end;
@@ -692,7 +767,8 @@ begin
       if (J > I + 2) and CanCloseEmphasis(Text, J, 2, False) then
       begin
         FlushBuffer;
-        AddToken(Result, ikStrike, Copy(Text, I + 2, J - I - 2));
+        ParseRuns(Copy(Text, I + 2, J - I - 2), References,
+          BaseStyle + [fsStrikeOut], BaseUrl, Tokens);
         I := J + 2;
         Continue;
       end;
@@ -704,7 +780,8 @@ begin
       if (J > I + 2) and CanCloseEmphasis(Text, J, 2, False) then
       begin
         FlushBuffer;
-        AddToken(Result, ikBold, Copy(Text, I + 2, J - I - 2));
+        ParseRuns(Copy(Text, I + 2, J - I - 2), References,
+          BaseStyle + [fsBold], BaseUrl, Tokens);
         I := J + 2;
         Continue;
       end;
@@ -716,7 +793,8 @@ begin
       if (J > I + 2) and CanCloseEmphasis(Text, J, 2, True) then
       begin
         FlushBuffer;
-        AddToken(Result, ikBold, Copy(Text, I + 2, J - I - 2));
+        ParseRuns(Copy(Text, I + 2, J - I - 2), References,
+          BaseStyle + [fsBold], BaseUrl, Tokens);
         I := J + 2;
         Continue;
       end;
@@ -729,13 +807,16 @@ begin
       if (J > I + 1) and CanCloseEmphasis(Text, J, 1, Text[I] = '_') then
       begin
         FlushBuffer;
-        AddToken(Result, ikItalic, Copy(Text, I + 1, J - I - 1));
+        ParseRuns(Copy(Text, I + 1, J - I - 1), References,
+          BaseStyle + [fsItalic], BaseUrl, Tokens);
         I := J + 1;
         Continue;
       end;
     end;
 
-    if Text[I] = '[' then
+    // Links are only parsed at the top level (no link is opened inside another
+    // link), so a non-empty BaseUrl skips link recognition.
+    if (BaseUrl = '') and (Text[I] = '[') then
     begin
       J := FindUnescaped(']', Text, I + 1);
       if (J > I) and (J < Length(Text)) and (Text[J + 1] = '(') then
@@ -744,7 +825,8 @@ begin
         if K > J then
         begin
           FlushBuffer;
-          AddToken(Result, ikLink, Copy(Text, I + 1, J - I - 1), Copy(Text, J + 2, K - J - 2));
+          ParseRuns(Copy(Text, I + 1, J - I - 1), References, BaseStyle,
+            LinkDestination(Copy(Text, J + 2, K - J - 2)), Tokens);
           I := K + 1;
           Continue;
         end;
@@ -763,7 +845,7 @@ begin
           if LinkUrl <> '' then
           begin
             FlushBuffer;
-            AddToken(Result, ikLink, LinkText, LinkUrl);
+            ParseRuns(LinkText, References, BaseStyle, LinkUrl, Tokens);
             I := K + 1;
             Continue;
           end;
@@ -775,6 +857,13 @@ begin
     Inc(I);
   end;
   FlushBuffer;
+end;
+
+class function TMarkDownBlockParser.ParseInline(const Text: string;
+  References: TStrings): TMarkDownInlineList;
+begin
+  Result := TMarkDownInlineList.Create;
+  ParseRuns(Text, References, [], '', Result);
 end;
 
 end.

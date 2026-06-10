@@ -27,6 +27,8 @@ Supported rendering includes:
 - Paragraphs
 - Bold and italic spans
 - Strikethrough spans
+- Nested inline formatting (e.g. bold containing italic, or styled link text)
+- Hard line breaks from two trailing spaces or a trailing backslash
 - Escaped markdown punctuation
 - Automatic links
 - Reference-style links
@@ -56,6 +58,21 @@ Strikethrough uses double tildes:
 
 ```markdown
 This is ~~no longer current~~.
+```
+
+Inline emphasis nests, so a span can carry more than one style, and link text
+can be formatted:
+
+```markdown
+This is **bold with _italic_ inside**, and a [**bold link**](https://example.com/).
+```
+
+End a line with two spaces or a backslash to force a hard line break within a
+paragraph:
+
+```markdown
+First line.<two spaces>
+Second line, same paragraph.
 ```
 
 Prefix markdown punctuation with a backslash to render it literally:

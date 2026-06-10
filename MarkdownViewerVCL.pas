@@ -1536,30 +1536,22 @@ var
       Canvas.Font.Name := FontName;
   end;
 
-  procedure AssignInlineFont(Kind: TMarkDownInlineKind; BaseStyle: TFontStyles; SizeDelta: Integer);
+  procedure AssignInlineFont(const Token: TMarkDownInlineToken; BaseStyle: TFontStyles; SizeDelta: Integer);
   begin
     Canvas.Font.Assign(Font);
     Canvas.Font.Size := Max(1, Font.Size + SizeDelta);
-    Canvas.Font.Style := BaseStyle;
-    case Kind of
-      ikBold:
-        Canvas.Font.Style := BaseStyle + [fsBold];
-      ikItalic:
-        Canvas.Font.Style := BaseStyle + [fsItalic];
-      ikBoldItalic:
-        Canvas.Font.Style := BaseStyle + [fsBold, fsItalic];
-      ikCode:
-        begin
-          Canvas.Font.Name := 'Consolas';
-          Canvas.Font.Style := [];
-        end;
-      ikLink:
-        begin
-          Canvas.Font.Color := FLinkColor;
-          Canvas.Font.Style := BaseStyle + [fsUnderline];
-        end;
-      ikStrike:
-        Canvas.Font.Style := BaseStyle + [fsStrikeOut];
+    if Token.IsCode then
+    begin
+      // Code keeps its own emphasis but not the surrounding block style.
+      Canvas.Font.Name := 'Consolas';
+      Canvas.Font.Style := Token.Style;
+    end
+    else
+      Canvas.Font.Style := BaseStyle + Token.Style;
+    if Token.Url <> '' then
+    begin
+      Canvas.Font.Color := FLinkColor;
+      Canvas.Font.Style := Canvas.Font.Style + [fsUnderline];
     end;
   end;
 
@@ -1602,22 +1594,19 @@ var
       if Trim(AtomText) = '' then
         Exit(AtomText);
 
-      case Token.Kind of
-        ikBold:
-          Result := '**' + AtomText + '**';
-        ikItalic:
-          Result := '*' + AtomText + '*';
-        ikBoldItalic:
-          Result := '***' + AtomText + '***';
-        ikCode:
-          Result := '`' + AtomText + '`';
-        ikLink:
-          Result := '[' + AtomText + '](' + Token.Url + ')';
-        ikStrike:
-          Result := '~~' + AtomText + '~~';
-      else
-        Result := AtomText;
-      end;
+      Result := AtomText;
+      if Token.IsCode then
+        Result := '`' + Result + '`';
+      if fsStrikeOut in Token.Style then
+        Result := '~~' + Result + '~~';
+      if (fsBold in Token.Style) and (fsItalic in Token.Style) then
+        Result := '***' + Result + '***'
+      else if fsBold in Token.Style then
+        Result := '**' + Result + '**'
+      else if fsItalic in Token.Style then
+        Result := '*' + Result + '*';
+      if Token.Url <> '' then
+        Result := '[' + Result + '](' + Token.Url + ')';
     end;
 
     procedure DrawSearchHighlights(const AText: string; TextX, TextY, TextHeight: Integer);
@@ -1665,7 +1654,9 @@ var
       Result := 0;
       for MeasureToken := StartToken to ATokens.Count - 1 do
       begin
-        AssignInlineFont(ATokens[MeasureToken].Kind, BaseStyle, SizeDelta);
+        if ATokens[MeasureToken].LineBreak then
+          Exit;
+        AssignInlineFont(ATokens[MeasureToken], BaseStyle, SizeDelta);
         if MeasureToken = StartToken then
           MeasureAtom := StartAtom
         else
@@ -1709,7 +1700,16 @@ var
 
     for TokenIndex := 0 to ATokens.Count - 1 do
     begin
-      AssignInlineFont(ATokens[TokenIndex].Kind, BaseStyle, SizeDelta);
+      if ATokens[TokenIndex].LineBreak then
+      begin
+        if ADraw then
+          AddSelectableBreak(False);
+        Inc(YPos, LineHeight);
+        LineUsed := 0;
+        X := AlignedX(TokenIndex + 1, 1);
+        Continue;
+      end;
+      AssignInlineFont(ATokens[TokenIndex], BaseStyle, SizeDelta);
       AtomIndex := 1;
       while AtomIndex <= Length(ATokens[TokenIndex].Text) do
       begin
@@ -1723,7 +1723,7 @@ var
           Inc(YPos, LineHeight);
           LineUsed := 0;
           X := AlignedX(TokenIndex, AtomStart);
-          AssignInlineFont(ATokens[TokenIndex].Kind, BaseStyle, SizeDelta);
+          AssignInlineFont(ATokens[TokenIndex], BaseStyle, SizeDelta);
         end;
 
         if ADraw then
@@ -1738,7 +1738,7 @@ var
           TextStart := AddSelectableRun(AtomRect, Atom, AtomMarkdown);
           if (YPos + LineHeight >= 0) and (YPos <= ClientHeight) then
           begin
-            if ATokens[TokenIndex].Kind = ikCode then
+            if ATokens[TokenIndex].IsCode then
             begin
               OldBrushColor := Canvas.Brush.Color;
               OldBrushStyle := Canvas.Brush.Style;
@@ -1753,7 +1753,7 @@ var
             OldBkMode := SetBkMode(Canvas.Handle, TRANSPARENT);
             DrawSelectableText(Atom, X, YPos + 2, TextStart);
             SetBkMode(Canvas.Handle, OldBkMode);
-            if (ATokens[TokenIndex].Kind = ikLink) and (Trim(Atom) <> '') and (FLinkHits <> nil) then
+            if (ATokens[TokenIndex].Url <> '') and (Trim(Atom) <> '') and (FLinkHits <> nil) then
             begin
               Hit.Rect := AtomRect;
               Hit.Url := ATokens[TokenIndex].Url;
