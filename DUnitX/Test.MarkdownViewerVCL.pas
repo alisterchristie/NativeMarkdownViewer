@@ -314,7 +314,7 @@ begin
     Assert.AreEqual(Integer(clDefault), Integer(Viewer.CodeBackgroundColor));
     Assert.AreEqual(Integer(clSilver), Integer(Viewer.QuoteBarColor));
     Assert.AreEqual(Integer($00E1E1E1), Integer(Viewer.HeadingRuleColor));
-    Assert.AreEqual(Integer($00BFFFFF), Integer(Viewer.SearchHighlightColor));
+    Assert.AreEqual(Integer(clDefault), Integer(Viewer.SearchHighlightColor));
   finally
     Viewer.Free;
   end;

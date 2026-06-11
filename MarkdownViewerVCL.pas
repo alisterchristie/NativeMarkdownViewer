@@ -97,6 +97,7 @@ type
     function GetEffectiveGridlineColor: TColor;
     function GetEffectiveTableHeaderColor: TColor;
     function GetEffectiveCodeBackgroundColor: TColor;
+    function GetEffectiveSearchHighlightColor: TColor;
     function UseThemedColors: Boolean;
     procedure UpdateScrollBar;
     procedure WMEraseBkgnd(var Message: TMessage); message WM_ERASEBKGND;
@@ -150,7 +151,7 @@ type
     property ParentFont;
     property PopupMenu;
     property QuoteBarColor: TColor read FQuoteBarColor write SetQuoteBarColor default clSilver;
-    property SearchHighlightColor: TColor read FSearchHighlightColor write SetSearchHighlightColor default $00BFFFFF;
+    property SearchHighlightColor: TColor read FSearchHighlightColor write SetSearchHighlightColor default clDefault;
     property SearchText: string read FSearchText write SetSearchText;
     property ShowHint;
     property TabOrder;
@@ -280,7 +281,7 @@ begin
   FCodeBackgroundColor := clDefault;
   FQuoteBarColor := clSilver;
   FHeadingRuleColor := $00E1E1E1;
-  FSearchHighlightColor := $00BFFFFF;
+  FSearchHighlightColor := clDefault;
   FMarkdown := TStringList.Create;
   FMarkdown.OnChange := MarkdownChanged;
   FLinkReferences := TStringList.Create;
@@ -420,6 +421,27 @@ begin
     Result := RGB(Max(0, R - 28), Max(0, G - 28), Max(0, B - 28))
   else
     Result := RGB(Min(255, R + 32), Min(255, G + 32), Min(255, B + 32));
+end;
+
+function TMarkDownViewer.GetEffectiveSearchHighlightColor: TColor;
+var
+  BaseColor: TColor;
+  R, G, B: Integer;
+  Luminance: Double;
+begin
+  if FSearchHighlightColor <> clDefault then
+    Exit(FSearchHighlightColor);
+
+  BaseColor := ColorToRGB(GetEffectiveBackground);
+  R := GetRValue(BaseColor);
+  G := GetGValue(BaseColor);
+  B := GetBValue(BaseColor);
+  Luminance := 0.299 * R + 0.587 * G + 0.114 * B;
+
+  if Luminance > 128 then
+    Result := RGB(Min(255, R + 20), Min(255, G + 20), Max(0, B - 40))
+  else
+    Result := RGB(Min(255, R + 64), Min(255, G + 64), Min(255, B + 72));
 end;
 
 procedure TMarkDownViewer.ClearInlineTokenCaches;
@@ -1777,7 +1799,7 @@ var
 
         OldColor := Canvas.Brush.Color;
         OldStyle := Canvas.Brush.Style;
-        Canvas.Brush.Color := FSearchHighlightColor;
+        Canvas.Brush.Color := GetEffectiveSearchHighlightColor;
         Canvas.Brush.Style := bsSolid;
         Canvas.FillRect(HighlightRect);
         Canvas.Brush.Color := OldColor;
