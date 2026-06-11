@@ -20,6 +20,7 @@ type
     FMarkdown: TStringList;
     FBlocks: TMarkDownBlockList;
     FLinkHits: TMarkDownLinkHitList;
+    FTaskHits: TMarkDownTaskHitList;
     FTextRuns: TMarkDownTextRunList;
     FCopyChunks: TMarkDownCopyChunkList;
     FSelectableText: string;
@@ -39,6 +40,9 @@ type
     FImageAges: TDictionary<string, TDateTime>;
     FLinkReferences: TStringList;
     FSearchText: string;
+    FCodeFontName: string;
+    FEffectiveCodeFont: string;
+    FAllowTaskToggle: Boolean;
     FAppendEndedWithCR: Boolean;
     FUpdatingMarkdown: Boolean;
     FReadOnly: Boolean;
@@ -73,6 +77,8 @@ type
     procedure SelectAllText;
     procedure SetBasePath(const Value: string);
     procedure SetCodeBackgroundColor(const Value: TColor);
+    procedure SetCodeFontName(const Value: string);
+    procedure ToggleTaskAtLine(SourceLine: Integer);
     procedure SetReadOnly(const Value: Boolean);
     procedure SetLinkColor(const Value: TColor);
     procedure SetMarkdown(const Value: TStrings);
@@ -102,6 +108,9 @@ type
     procedure AppendMarkdownText(const Value: string);
     procedure CopySelection(PlainText: Boolean = False);
     function SelectedText(PlainText: Boolean = False): string;
+    function FindNext: Boolean;
+    function FindPrevious: Boolean;
+    function SearchMatchCount: Integer;
     procedure LoadFromFile(const FileName: string);
     procedure Redo;
     procedure SelectAll;
@@ -112,9 +121,11 @@ type
   published
     property Align;
     property Anchors;
+    property AllowTaskToggle: Boolean read FAllowTaskToggle write FAllowTaskToggle default True;
     property BasePath: string read FBasePath write SetBasePath;
     property Color default clWindow;
     property CodeBackgroundColor: TColor read FCodeBackgroundColor write SetCodeBackgroundColor default $00F2F2F2;
+    property CodeFontName: string read FCodeFontName write SetCodeFontName;
     property Constraints;
     property ReadOnly: Boolean read FReadOnly write SetReadOnly default True;
     property Enabled;
@@ -159,6 +170,7 @@ uses
   System.SysUtils,
   Winapi.ShellAPI,
   Vcl.Clipbrd,
+  Vcl.Forms,
   Vcl.Imaging.jpeg,
   Vcl.Imaging.pngimage,
   MarkdownViewer.Parser,
@@ -168,6 +180,35 @@ const
   MarkdownPadding = 14;
   ParagraphSpacing = 9;
   MaxUndoDepth = 100;
+
+// Returns the requested font if it is installed, otherwise a monospace fallback
+// that ships with Windows so code blocks always render in a fixed-width face.
+function ResolveMonospaceFont(const Name: string): string;
+begin
+  if (Name <> '') and (Screen.Fonts.IndexOf(Name) >= 0) then
+    Result := Name
+  else
+    Result := 'Courier New';
+end;
+
+// Flips a `[ ]` task marker to `[x]` (or back) in a source line, returning the
+// line unchanged when it holds no task marker.
+function FlipTaskMarker(const Line: string): string;
+var
+  I: Integer;
+begin
+  Result := Line;
+  for I := 1 to Length(Line) - 2 do
+    if (Line[I] = '[') and (Line[I + 2] = ']') and
+      ((Line[I + 1] = ' ') or (UpCase(Line[I + 1]) = 'X')) then
+    begin
+      if Line[I + 1] = ' ' then
+        Result := Copy(Line, 1, I) + 'x' + Copy(Line, I + 2, MaxInt)
+      else
+        Result := Copy(Line, 1, I) + ' ' + Copy(Line, I + 2, MaxInt);
+      Exit;
+    end;
+end;
 
 // Only shell out for URL schemes that cannot run local programs; anything
 // else in a document (file paths, custom schemes) must go through the
@@ -229,8 +270,12 @@ begin
   FMarkdown.OnChange := MarkdownChanged;
   FLinkReferences := TStringList.Create;
   FLinkReferences.CaseSensitive := False;
+  FCodeFontName := 'Consolas';
+  FEffectiveCodeFont := ResolveMonospaceFont(FCodeFontName);
+  FAllowTaskToggle := True;
   FBlocks := TMarkDownBlockList.Create(True);
   FLinkHits := TMarkDownLinkHitList.Create;
+  FTaskHits := TMarkDownTaskHitList.Create;
   FTextRuns := TMarkDownTextRunList.Create;
   FCopyChunks := TMarkDownCopyChunkList.Create;
   FImageCache := TObjectDictionary<string, TPicture>.Create([doOwnsValues]);
@@ -250,6 +295,7 @@ begin
   FImageCache.Free;
   FCopyChunks.Free;
   FTextRuns.Free;
+  FTaskHits.Free;
   FLinkHits.Free;
   FBlocks.Free;
   FLinkReferences.Free;
@@ -1182,6 +1228,7 @@ procedure TMarkDownViewer.MouseMove(Shift: TShiftState; X, Y: Integer);
 var
   I: Integer;
   IsLink: Boolean;
+  IsTaskBox: Boolean;
 begin
   inherited;
   if FSelecting then
@@ -1203,7 +1250,16 @@ begin
         Break;
       end;
 
-  if IsLink and (FReadOnly or (ssCtrl in Shift)) then
+  IsTaskBox := False;
+  if FAllowTaskToggle and (FTaskHits <> nil) then
+    for I := 0 to FTaskHits.Count - 1 do
+      if PtInRect(FTaskHits[I].Rect, Point(X, Y)) then
+      begin
+        IsTaskBox := True;
+        Break;
+      end;
+
+  if IsTaskBox or (IsLink and (FReadOnly or (ssCtrl in Shift))) then
     Cursor := crHandPoint
   else
     if not FReadOnly then
@@ -1231,6 +1287,16 @@ begin
 
   if HasSelection then
     Exit;
+
+  // Task checkboxes toggle on a plain click whether or not the view is editable.
+  if FAllowTaskToggle and (FTaskHits <> nil) then
+    for I := 0 to FTaskHits.Count - 1 do
+      if PtInRect(FTaskHits[I].Rect, Point(X, Y)) then
+      begin
+        ToggleTaskAtLine(FTaskHits[I].SourceLine);
+        Exit;
+      end;
+
   if not FReadOnly and not (ssCtrl in Shift) then
     Exit;
 
@@ -1265,6 +1331,7 @@ var
   LineIndex: Integer;
   R: TRect;
   CheckRect: TRect;
+  TaskHit: TMarkDownTaskHit;
   CanvasState: TCanvasState;
   Bullet: string;
   ListMarker: string;
@@ -1542,7 +1609,7 @@ var
     if Token.IsCode then
     begin
       // Code keeps its own emphasis but not the surrounding block style.
-      Canvas.Font.Name := 'Consolas';
+      Canvas.Font.Name := FEffectiveCodeFont;
       Canvas.Font.Style := Token.Style;
     end
     else
@@ -1957,6 +2024,7 @@ begin
   Canvas.FillRect(ClientRect);
 
   FLinkHits.Clear;
+  FTaskHits.Clear;
   FTextRuns.Clear;
   FCopyChunks.Clear;
   FSelectableText := '';
@@ -2012,6 +2080,9 @@ begin
               DrawFrameControl(Canvas.Handle, CheckRect, DFC_BUTTON, DFCS_BUTTONCHECK or DFCS_CHECKED)
             else
               DrawFrameControl(Canvas.Handle, CheckRect, DFC_BUTTON, DFCS_BUTTONCHECK);
+            TaskHit.Rect := CheckRect;
+            TaskHit.SourceLine := Block.SourceStartLine;
+            FTaskHits.Add(TaskHit);
           end
           else
           begin
@@ -2061,7 +2132,7 @@ begin
         end;
       bkCodeBlock:
         begin
-          AssignBaseFont([], 0, 'Consolas');
+          AssignBaseFont([], 0, FEffectiveCodeFont);
           LineHeight := Canvas.TextHeight('Wg') + 5;
           Lines := TStringList.Create;
           try
@@ -2133,6 +2204,121 @@ begin
   Invalidate;
 end;
 
+procedure TMarkDownViewer.ToggleTaskAtLine(SourceLine: Integer);
+var
+  NewLine: string;
+begin
+  if (SourceLine < 0) or (SourceLine >= FMarkdown.Count) then
+    Exit;
+  NewLine := FlipTaskMarker(FMarkdown[SourceLine]);
+  if NewLine = FMarkdown[SourceLine] then
+    Exit;
+
+  FUndoStack.Add(FMarkdown.Text);
+  while FUndoStack.Count > MaxUndoDepth do
+    FUndoStack.Delete(0);
+  FRedoStack.Clear;
+
+  FApplyingEdit := True;
+  try
+    FMarkdown[SourceLine] := NewLine;
+  finally
+    FApplyingEdit := False;
+  end;
+end;
+
+function TMarkDownViewer.SearchMatchCount: Integer;
+var
+  Hay: string;
+  Needle: string;
+  FoundAt: Integer;
+begin
+  Result := 0;
+  if FSearchText = '' then
+    Exit;
+  if FSelectableText = '' then
+    Repaint;
+
+  Hay := LowerCase(FSelectableText);
+  Needle := LowerCase(FSearchText);
+  FoundAt := Pos(Needle, Hay);
+  while FoundAt > 0 do
+  begin
+    Inc(Result);
+    FoundAt := PosEx(Needle, Hay, FoundAt + Length(Needle));
+  end;
+end;
+
+function TMarkDownViewer.FindNext: Boolean;
+var
+  Hay: string;
+  Needle: string;
+  FoundAt: Integer;
+begin
+  Result := False;
+  if FSearchText = '' then
+    Exit;
+  if FSelectableText = '' then
+    Repaint;
+
+  Hay := LowerCase(FSelectableText);
+  Needle := LowerCase(FSearchText);
+  FoundAt := PosEx(Needle, Hay, Max(FSelectionAnchor, FSelectionCaret) + 1);
+  if FoundAt = 0 then
+    FoundAt := Pos(Needle, Hay); // wrap to the top
+  if FoundAt = 0 then
+    Exit;
+
+  FSelectionAnchor := FoundAt - 1;
+  FSelectionCaret := FoundAt - 1 + Length(FSearchText);
+  ScrollCaretIntoView;
+  Invalidate;
+  Result := True;
+end;
+
+function TMarkDownViewer.FindPrevious: Boolean;
+var
+  Hay: string;
+  Needle: string;
+  Limit: Integer;
+  FoundAt: Integer;
+  Best: Integer;
+  Last: Integer;
+begin
+  Result := False;
+  if FSearchText = '' then
+    Exit;
+  if FSelectableText = '' then
+    Repaint;
+
+  Hay := LowerCase(FSelectableText);
+  Needle := LowerCase(FSearchText);
+
+  // Walk every match in order; Best keeps the last one that starts before the
+  // current selection, and Last keeps the final match for wrap-around.
+  Limit := Min(FSelectionAnchor, FSelectionCaret);
+  Best := 0;
+  Last := 0;
+  FoundAt := Pos(Needle, Hay);
+  while FoundAt > 0 do
+  begin
+    Last := FoundAt;
+    if FoundAt <= Limit then
+      Best := FoundAt;
+    FoundAt := PosEx(Needle, Hay, FoundAt + 1);
+  end;
+  if Best = 0 then
+    Best := Last; // wrap to the last match
+  if Best = 0 then
+    Exit;
+
+  FSelectionAnchor := Best - 1;
+  FSelectionCaret := Best - 1 + Length(FSearchText);
+  ScrollCaretIntoView;
+  Invalidate;
+  Result := True;
+end;
+
 procedure TMarkDownViewer.ScrollCaretIntoView;
 var
   I: Integer;
@@ -2175,6 +2361,17 @@ begin
   if FCodeBackgroundColor <> Value then
   begin
     FCodeBackgroundColor := Value;
+    Invalidate;
+  end;
+end;
+
+procedure TMarkDownViewer.SetCodeFontName(const Value: string);
+begin
+  if FCodeFontName <> Value then
+  begin
+    FCodeFontName := Value;
+    FEffectiveCodeFont := ResolveMonospaceFont(Value);
+    InvalidateLayout;
     Invalidate;
   end;
 end;

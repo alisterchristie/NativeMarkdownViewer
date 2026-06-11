@@ -39,6 +39,7 @@ Supported rendering includes:
 - Ordered and unordered lists
 - Nested list indentation
 - Task lists with checked and unchecked boxes
+- Clickable task checkboxes that toggle the source (`AllowTaskToggle`)
 - Pipe tables with left, center, and right alignment
 - Inline formatting and links inside table cells
 - Local images with scaled rendering and alt-text fallback
@@ -49,7 +50,8 @@ Supported rendering includes:
 - Copy selected markdown with `Ctrl+C`
 - Copy selected plain text with `Ctrl+Shift+C`
 - Read the current selection as markdown or plain text via `SelectedText`
-- Case-insensitive find highlighting
+- Case-insensitive find highlighting with next/previous navigation
+- Configurable code font (`CodeFontName`, monospace fallback)
 - Incremental streaming with tail-only block parsing
 - Optional in-place editing of the rendered markdown source
 - Undo and redo of edits
@@ -165,6 +167,25 @@ To highlight matching text, assign `SearchText`:
 Viewer.SearchText := 'markdown';
 Viewer.SearchHighlightColor := $00BFFFFF;
 ```
+
+`FindNext` and `FindPrevious` move the selection to the next or previous match
+(wrapping around the document) and scroll it into view, and `SearchMatchCount`
+returns the number of matches:
+
+```pascal
+if Viewer.FindNext then
+  StatusBar.SimpleText := Format('%d matches', [Viewer.SearchMatchCount]);
+```
+
+Fenced and inline code render in a monospace font you can change, with an
+automatic fallback when the requested font is not installed:
+
+```pascal
+Viewer.CodeFontName := 'Cascadia Code';
+```
+
+Task list checkboxes are clickable by default and toggle the underlying
+markdown source (set `AllowTaskToggle := False` for a static preview).
 
 Or load from a file:
 

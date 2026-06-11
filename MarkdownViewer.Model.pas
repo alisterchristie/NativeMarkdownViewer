@@ -50,8 +50,16 @@ type
     Url: string;
   end;
 
+  // A clickable task-list checkbox: its on-screen rectangle and the source line
+  // that holds the `[ ]`/`[x]` marker to toggle.
+  TMarkDownTaskHit = record
+    Rect: TRect;
+    SourceLine: Integer;
+  end;
+
   TMarkDownBlockList = TObjectList<TMarkDownBlock>;
   TMarkDownLinkHitList = TList<TMarkDownLinkHit>;
+  TMarkDownTaskHitList = TList<TMarkDownTaskHit>;
 
   TMarkDownTextRun = record
     FontName: string;

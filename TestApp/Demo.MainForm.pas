@@ -90,6 +90,7 @@ type
     FSyncingScroll: Boolean;
     function ConfirmSaveChanges: Boolean;
     procedure EditorWindowProc(var Message: TMessage);
+    procedure FindEditKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
     function GetEditorScrollRange(out Position, MaxPosition: Integer): Boolean;
     procedure LoadDocument(const FileName: string);
     procedure SetDocumentText(const Text, FileName: string);
@@ -120,69 +121,57 @@ const
   SampleMarkdown = '''
 # TMarkDownViewer
 
-This is a native **VCL** markdown viewer component. It paints markdown text directly, supports `inline code`, and can be created at runtime.
+This is a native **VCL** markdown viewer component. It paints markdown text directly, supports `inline code`, and can be created at runtime - no WebView or browser required.
 
-## Supported examples
+## Inline formatting
 
-- Headings
-- **Bold**, *italic*, and ~~strikethrough~~ spans
-- Escaped markdown characters
-- Automatic links
-- Ordered and unordered lists
-- Nested lists
-- Block quotes
-- Code blocks
-- Tables
-- Task lists
-- Local images with fallback alt text
-- [Clickable links](https://www.embarcadero.com/)
-- Reference-style links
+- **Bold**, *italic*, ***bold italic***, and ~~strikethrough~~ spans
+- Nested styles such as **bold with an *italic* word** and a [**bold link**](https://www.embarcadero.com/)
+- Escaped characters remain literal: \*not italic\*, \[not a link\], and \`not code\`
+- Hard line breaks: this line ends with two spaces
+  so it continues on the next line in the same paragraph.
 
-Automatic link examples: https://www.embarcadero.com/ and <https://docwiki.embarcadero.com/>.
+Automatic links work too: https://www.embarcadero.com/ and <https://docwiki.embarcadero.com/>. [Reference-style links][docwiki] are resolved from definitions elsewhere, and the same reference can be reused, including this [DocWiki shortcut][docwiki].
 
-[Reference-style links][docwiki] are resolved from definitions elsewhere in the markdown. The same reference can be reused, including this [DocWiki shortcut][docwiki].
-
-The demo find box highlights every visible match for markdown.
-
-Escaped characters remain literal: \*not italic\*, \[not a link\], and \`not code\`.
-
-> The component is in the package, but this demo creates it in code so it does not need to be installed in the IDE.
+> Block quotes stand out from the surrounding text. The component lives in the
+> package, but this demo creates it in code so it does not need to be installed.
 
 ---
+
+## Task lists (click a checkbox!)
+
+The checkboxes below are interactive - click one in the preview to toggle it.
+
+- [x] Render headings, lists, and inline styles
+- [x] Render tables and images
+  - [x] Nested completed task
+  - [ ] Nested pending task
+- [ ] Toggle me with the mouse
 
 ## Tables
 
-| Header Column 1 | Header Column 2 | Align Center | Align Right |
+| Feature | Status | Align Center | Align Right |
 | :--- | :--- | :---: | ---: |
-| **Bold row data** | Sample value A | `inline code` | $100.00 |
-| Left row data 2 | *Italic value* | [DocWiki][docwiki] | $1,500.00 |
-| Left row data 3 | ~~Old value~~ | Center text | $45.50 |
+| **Inline styles** | Done | `code` | $100.00 |
+| *Tables* | Done | [DocWiki][docwiki] | $1,500.00 |
+| ~~Old API~~ | Removed | Center | $45.50 |
 
----
+## Nested lists
 
-## Task Lists
-- [x] Verified basic structural formatting
-- [x] Verified lists and syntax blocks
-  - [x] Nested completed task
-  - [ ] Nested pending task
-- [ ] Remaining item to be completed
-
----
-
-## Nested Lists
 - Top-level item
   - Nested item
     - Deeper nested item
 - Another top-level item
 
----
-
 ## Images
+
 ![Sample local image alt text](sample-image.jpg)
 
-If the image path is missing or remote, the viewer displays the alt text.
+If the image path is missing or remote, the viewer displays the alt text instead.
 
----
+## Code blocks
+
+Fenced code renders in the configurable code font (`CodeFontName`):
 
 ```
 var
@@ -191,8 +180,13 @@ begin
   Viewer := TMarkDownViewer.Create(Self);
   Viewer.Parent := Self;
   Viewer.Align := alClient;
+  Viewer.MarkdownText := '# Hello, **markdown**';
 end;
 ```
+
+---
+
+Use the find box above to highlight matches, then press **Enter** for the next match or **Shift+Enter** for the previous one.
 
 [docwiki]: https://docwiki.embarcadero.com/
 ''';
@@ -249,8 +243,21 @@ begin
   SaveDialog.DefaultExt := 'md';
   SaveDialog.Options := SaveDialog.Options + [ofOverwritePrompt, ofPathMustExist];
   SetDocumentText(SampleMarkdown, '');
+  FindEdit.OnKeyDown := FindEditKeyDown;
   FindEdit.Text := 'markdown';
   UpdateInterface;
+end;
+
+procedure TMainForm.FindEditKeyDown(Sender: TObject; var Key: Word;
+  Shift: TShiftState);
+begin
+  if Key <> VK_RETURN then
+    Exit;
+  if ssShift in Shift then
+    Viewer.FindPrevious
+  else
+    Viewer.FindNext;
+  Key := 0;
 end;
 
 function TMainForm.GetEditorScrollRange(out Position,

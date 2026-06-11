@@ -86,6 +86,22 @@ type
     [Test]
     procedure ClickingUnsafeLinkWithoutHandlerIsIgnored;
     [Test]
+    procedure CodeFontNameDefaultsToConsolas;
+    [Test]
+    procedure CodeFontNameRoundTrips;
+    [Test]
+    procedure SearchMatchCountCountsOccurrences;
+    [Test]
+    procedure FindNextCyclesThroughMatches;
+    [Test]
+    procedure FindPreviousMovesBackward;
+    [Test]
+    procedure TaskCheckboxClickToggles;
+    [Test]
+    procedure TaskToggleCanBeUndone;
+    [Test]
+    procedure DisablingTaskToggleIgnoresClicks;
+    [Test]
     procedure AppendsMarkdownWithoutReplacingExistingText;
     [Test]
     procedure AppendFiresOnChange;
@@ -643,6 +659,111 @@ begin
   FViewer.ClickMouse(LinkX, LinkY);
 
   Assert.Pass;
+end;
+
+procedure TMarkDownViewerTests.CodeFontNameDefaultsToConsolas;
+var
+  Viewer: TMarkDownViewer;
+begin
+  Viewer := TMarkDownViewer.Create(nil);
+  try
+    Assert.AreEqual('Consolas', Viewer.CodeFontName);
+  finally
+    Viewer.Free;
+  end;
+end;
+
+procedure TMarkDownViewerTests.CodeFontNameRoundTrips;
+var
+  Viewer: TMarkDownViewer;
+begin
+  Viewer := TMarkDownViewer.Create(nil);
+  try
+    Viewer.CodeFontName := 'Courier New';
+    Assert.AreEqual('Courier New', Viewer.CodeFontName);
+  finally
+    Viewer.Free;
+  end;
+end;
+
+procedure TMarkDownViewerTests.SearchMatchCountCountsOccurrences;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'one match two match three';
+  RepaintViewer;
+
+  FViewer.SearchText := 'match';
+  Assert.AreEqual(2, FViewer.SearchMatchCount);
+end;
+
+procedure TMarkDownViewerTests.FindNextCyclesThroughMatches;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'Apple apple APPLE';
+  RepaintViewer;
+  FViewer.SearchText := 'apple';
+
+  // Case-insensitive matching, original case preserved, wrap at the end.
+  Assert.IsTrue(FViewer.FindNext);
+  Assert.AreEqual('Apple', FViewer.SelectedText(True));
+  Assert.IsTrue(FViewer.FindNext);
+  Assert.AreEqual('apple', FViewer.SelectedText(True));
+  Assert.IsTrue(FViewer.FindNext);
+  Assert.AreEqual('APPLE', FViewer.SelectedText(True));
+  Assert.IsTrue(FViewer.FindNext);
+  Assert.AreEqual('Apple', FViewer.SelectedText(True));
+end;
+
+procedure TMarkDownViewerTests.FindPreviousMovesBackward;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'Apple apple APPLE';
+  RepaintViewer;
+  FViewer.SearchText := 'apple';
+
+  FViewer.FindNext;            // Apple
+  FViewer.FindNext;            // apple
+  Assert.IsTrue(FViewer.FindPrevious);
+  Assert.AreEqual('Apple', FViewer.SelectedText(True));
+end;
+
+procedure TMarkDownViewerTests.TaskCheckboxClickToggles;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := '- [ ] task';
+  RepaintViewer;
+
+  // The checkbox sits near the top-left of the first list item.
+  FViewer.ClickMouse(24, 24);
+  Assert.IsTrue(FViewer.MarkdownText.Contains('[x]'), FViewer.MarkdownText);
+
+  RepaintViewer;
+  FViewer.ClickMouse(24, 24);
+  Assert.IsTrue(FViewer.MarkdownText.Contains('[ ]'), FViewer.MarkdownText);
+end;
+
+procedure TMarkDownViewerTests.TaskToggleCanBeUndone;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := '- [ ] task';
+  RepaintViewer;
+
+  FViewer.ClickMouse(24, 24);
+  Assert.IsTrue(FViewer.MarkdownText.Contains('[x]'), FViewer.MarkdownText);
+
+  FViewer.Undo;
+  Assert.IsTrue(FViewer.MarkdownText.Contains('[ ]'), FViewer.MarkdownText);
+end;
+
+procedure TMarkDownViewerTests.DisablingTaskToggleIgnoresClicks;
+begin
+  ShowViewer(400, 300);
+  FViewer.AllowTaskToggle := False;
+  FViewer.MarkdownText := '- [ ] task';
+  RepaintViewer;
+
+  FViewer.ClickMouse(24, 24);
+  Assert.IsTrue(FViewer.MarkdownText.Contains('[ ]'), FViewer.MarkdownText);
 end;
 
 procedure TMarkDownViewerTests.AppendsMarkdownWithoutReplacingExistingText;
