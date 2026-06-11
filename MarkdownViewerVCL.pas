@@ -96,6 +96,7 @@ type
     function GetEffectiveSelectionTextColor: TColor;
     function GetEffectiveGridlineColor: TColor;
     function GetEffectiveTableHeaderColor: TColor;
+    function GetEffectiveCodeBackgroundColor: TColor;
     function UseThemedColors: Boolean;
     procedure UpdateScrollBar;
     procedure WMEraseBkgnd(var Message: TMessage); message WM_ERASEBKGND;
@@ -136,7 +137,7 @@ type
     property AllowTaskToggle: Boolean read FAllowTaskToggle write FAllowTaskToggle default True;
     property BasePath: string read FBasePath write SetBasePath;
     property Color default clWindow;
-    property CodeBackgroundColor: TColor read FCodeBackgroundColor write SetCodeBackgroundColor default $00F2F2F2;
+    property CodeBackgroundColor: TColor read FCodeBackgroundColor write SetCodeBackgroundColor default clDefault;
     property CodeFontName: string read FCodeFontName write SetCodeFontName;
     property Constraints;
     property HeadingRuleColor: TColor read FHeadingRuleColor write SetHeadingRuleColor default $00E1E1E1;
@@ -276,7 +277,7 @@ begin
   Color := clWindow;
   ParentColor := False;
   FLinkColor := clHighlight;
-  FCodeBackgroundColor := $00F2F2F2;
+  FCodeBackgroundColor := clDefault;
   FQuoteBarColor := clSilver;
   FHeadingRuleColor := $00E1E1E1;
   FSearchHighlightColor := $00BFFFFF;
@@ -398,6 +399,27 @@ begin
     Result := StyleServices.GetSystemColor(clBtnFace)
   else
     Result := $00F7F7F7;
+end;
+
+function TMarkDownViewer.GetEffectiveCodeBackgroundColor: TColor;
+var
+  BaseColor: TColor;
+  R, G, B: Integer;
+  Luminance: Double;
+begin
+  if FCodeBackgroundColor <> clDefault then
+    Exit(FCodeBackgroundColor);
+
+  BaseColor := ColorToRGB(GetEffectiveBackground);
+  R := GetRValue(BaseColor);
+  G := GetGValue(BaseColor);
+  B := GetBValue(BaseColor);
+  Luminance := 0.299 * R + 0.587 * G + 0.114 * B;
+
+  if Luminance > 128 then
+    Result := RGB(Max(0, R - 28), Max(0, G - 28), Max(0, B - 28))
+  else
+    Result := RGB(Min(255, R + 32), Min(255, G + 32), Min(255, B + 32));
 end;
 
 procedure TMarkDownViewer.ClearInlineTokenCaches;
@@ -1856,7 +1878,7 @@ var
             begin
               OldBrushColor := Canvas.Brush.Color;
               OldBrushStyle := Canvas.Brush.Style;
-              Canvas.Brush.Color := FCodeBackgroundColor;
+              Canvas.Brush.Color := GetEffectiveCodeBackgroundColor;
               Canvas.Brush.Style := bsSolid;
               Canvas.FillRect(Rect(AtomRect.Left - 2, AtomRect.Top + 1, AtomRect.Right + 2, AtomRect.Bottom - 1));
               Canvas.Brush.Color := OldBrushColor;
@@ -2243,7 +2265,7 @@ begin
             R := Rect(TextLeft, Y + 2, TextLeft + ContentWidth, Y + TokenHeight);
             CanvasState := TCanvasState.Save(Canvas);
             try
-              Canvas.Brush.Color := FCodeBackgroundColor;
+              Canvas.Brush.Color := GetEffectiveCodeBackgroundColor;
               Canvas.FillRect(R);
               Canvas.Brush.Style := bsClear;
               for LineIndex := 0 to Lines.Count - 1 do
