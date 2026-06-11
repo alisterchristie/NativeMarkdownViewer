@@ -101,6 +101,27 @@ open the PNG. Prefer this over screenshotting the running demo.
   selectable-text-to-source position mapping consistent when changing parsing or layout.
 - Keep source ASCII unless there is a clear Delphi/VCL reason to use Unicode text.
 
+## Git Commits
+
+Commit messages should follow this format:
+
+```
+<one-line summary of the change>
+
+<detailed paragraph or more explaining the change, motivation, and
+any non-obvious design decisions.>
+
+<tool attribution line>
+```
+
+The tool attribution line reads, for example:
+
+```
+OpenCode using DeepSeek V4 Pro with max effort
+```
+
+Adjust the agent/tool name and effort level to match what was used.
+
 ## Generated Files
 
 Build outputs, local IDE metadata, package binaries, and debug executables are ignored by `.gitignore`. Do not rely on generated `Win32/`, `Win64/`, `*.dcu`, `*.bpl`, or `*.exe` files as source artifacts.
