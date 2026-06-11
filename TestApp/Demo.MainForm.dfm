@@ -2,8 +2,8 @@ object MainForm: TMainForm
   Left = 0
   Top = 0
   Caption = 'TMarkDownViewer Demo'
-  ClientHeight = 641
-  ClientWidth = 964
+  ClientHeight = 636
+  ClientWidth = 928
   Color = clBtnFace
   Font.Charset = DEFAULT_CHARSET
   Font.Color = clWindowText
@@ -20,30 +20,33 @@ object MainForm: TMainForm
     Left = 390
     Top = 34
     Width = 6
-    Height = 585
+    Height = 580
+    ExplicitHeight = 585
   end
   object Editor: TMemo
     Left = 0
     Top = 34
     Width = 390
-    Height = 585
+    Height = 580
     Align = alLeft
     ScrollBars = ssBoth
     TabOrder = 0
     WordWrap = False
     OnChange = EditorChanged
+    ExplicitHeight = 585
   end
   object FindPanel: TPanel
     Left = 0
     Top = 0
-    Width = 964
+    Width = 928
     Height = 34
     Align = alTop
     BevelOuter = bvNone
     ShowCaption = False
     TabOrder = 2
+    ExplicitWidth = 964
     DesignSize = (
-      964
+      928
       34)
     object FindLabel: TLabel
       Left = 214
@@ -82,27 +85,30 @@ object MainForm: TMainForm
     object FindEdit: TEdit
       Left = 252
       Top = 5
-      Width = 260
+      Width = 224
       Height = 23
       Anchors = [akLeft, akTop, akRight]
       TabOrder = 3
       OnChange = FindChanged
+      ExplicitWidth = 260
     end
     object ClearFindButton: TButton
-      Left = 518
+      Left = 482
       Top = 4
       Width = 58
       Height = 25
+      Anchors = [akTop, akRight]
       Caption = 'Clear'
       TabOrder = 4
       OnClick = ClearFindClick
+      ExplicitLeft = 518
     end
   end
   object Viewer: TMarkDownViewer
     Left = 396
     Top = 34
-    Width = 568
-    Height = 585
+    Width = 532
+    Height = 580
     Align = alClient
     ReadOnly = False
     Font.Charset = DEFAULT_CHARSET
@@ -116,14 +122,18 @@ object MainForm: TMainForm
     OnChange = ViewerChanged
     OnLinkClick = LinkClicked
     OnScroll = SyncEditorToViewer
+    ExplicitWidth = 568
+    ExplicitHeight = 585
   end
   object StatusBar: TStatusBar
     Left = 0
-    Top = 619
-    Width = 964
+    Top = 614
+    Width = 928
     Height = 22
     Panels = <>
     SimplePanel = True
+    ExplicitTop = 619
+    ExplicitWidth = 964
   end
   object MainMenu: TMainMenu
     Left = 816
