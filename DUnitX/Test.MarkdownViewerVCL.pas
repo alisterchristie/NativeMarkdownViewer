@@ -313,6 +313,7 @@ begin
     Assert.AreEqual(Integer(clHighlight), Integer(Viewer.LinkColor));
     Assert.AreEqual(Integer($00F2F2F2), Integer(Viewer.CodeBackgroundColor));
     Assert.AreEqual(Integer(clSilver), Integer(Viewer.QuoteBarColor));
+    Assert.AreEqual(Integer($00E1E1E1), Integer(Viewer.HeadingRuleColor));
     Assert.AreEqual(Integer($00BFFFFF), Integer(Viewer.SearchHighlightColor));
   finally
     Viewer.Free;
@@ -328,6 +329,7 @@ begin
     Viewer.LinkColor := clRed;
     Viewer.CodeBackgroundColor := clYellow;
     Viewer.QuoteBarColor := clGreen;
+    Viewer.HeadingRuleColor := clNavy;
     Viewer.SearchHighlightColor := clAqua;
     Viewer.BasePath := 'C:\docs\';
     Viewer.SearchText := 'needle';
@@ -336,6 +338,7 @@ begin
     Assert.AreEqual(Integer(clRed), Integer(Viewer.LinkColor));
     Assert.AreEqual(Integer(clYellow), Integer(Viewer.CodeBackgroundColor));
     Assert.AreEqual(Integer(clGreen), Integer(Viewer.QuoteBarColor));
+    Assert.AreEqual(Integer(clNavy), Integer(Viewer.HeadingRuleColor));
     Assert.AreEqual(Integer(clAqua), Integer(Viewer.SearchHighlightColor));
     Assert.AreEqual('C:\docs\', Viewer.BasePath);
     Assert.AreEqual('needle', Viewer.SearchText);

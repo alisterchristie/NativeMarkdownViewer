@@ -23,14 +23,17 @@ Native VCL markdown viewer component for Delphi.
 
 Supported rendering includes:
 
-- Headings
+- Headings (`#` style and `===`/`---` setext underlines)
+- Underline rule beneath H1/H2 headings (`HeadingRuleColor`, `clNone` to disable)
 - Paragraphs
 - Bold and italic spans
 - Strikethrough spans
 - Nested inline formatting (e.g. bold containing italic, or styled link text)
 - Hard line breaks from two trailing spaces or a trailing backslash
 - Escaped markdown punctuation
+- HTML entities (named, decimal, and hex)
 - Automatic links
+- Angle-bracket email autolinks
 - Reference-style links
 - Inline code
 - Fenced code blocks
@@ -84,11 +87,28 @@ Prefix markdown punctuation with a backslash to render it literally:
 \*not italic\* and \[not a link\]
 ```
 
-URLs using `http://`, `https://`, or `www.` are linked automatically. Angle-bracket autolinks are also supported:
+A line of text underlined with `=` or `-` becomes a heading:
+
+```markdown
+Title becomes an H1
+===================
+
+Subtitle becomes an H2
+----------------------
+```
+
+HTML entities are decoded, including named, decimal, and hex forms:
+
+```markdown
+&copy; 2024 &mdash; 100&nbsp;&times;&nbsp;200, &#169;, and &#x20AC;
+```
+
+URLs using `http://`, `https://`, or `www.` are linked automatically. Angle-bracket URL and email autolinks are also supported:
 
 ```markdown
 https://www.embarcadero.com/
 <https://docwiki.embarcadero.com/>
+<support@example.com>
 ```
 
 Reference-style links are resolved from definitions in the markdown:

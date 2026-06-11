@@ -16,6 +16,8 @@ type
       out IsTask, TaskChecked: Boolean); static;
     class function IsPipeTableRow(const Line: string): Boolean; static;
     class function IsRuleLine(const S: string): Boolean; static;
+    class function IsSetextUnderline(const Line: string;
+      out Level: Integer): Boolean; static;
     class function IsTableStart(Lines: TStrings; Index: Integer): Boolean; static;
     class function ParseBlocks(Lines: TStrings;
       StartLine: Integer = 0): TMarkDownBlockList; static;
@@ -78,6 +80,33 @@ begin
     for I := 2 to Length(T) do
       if T[I] <> C then
         Exit(False);
+end;
+
+class function TMarkDownBlockParser.IsSetextUnderline(const Line: string;
+  out Level: Integer): Boolean;
+var
+  T: string;
+  I: Integer;
+  C: Char;
+begin
+  Result := False;
+  Level := 0;
+  T := Trim(Line);
+  if T = '' then
+    Exit;
+
+  C := T[1];
+  if C = '=' then
+    Level := 1
+  else if C = '-' then
+    Level := 2
+  else
+    Exit;
+
+  for I := 2 to Length(T) do
+    if T[I] <> C then
+      Exit;
+  Result := True;
 end;
 
 class function TMarkDownBlockParser.TryParseLinkReference(const Line: string;
@@ -440,6 +469,20 @@ begin
       Continue;
     end;
 
+    // A line of '=' or '-' directly under paragraph text is a setext heading
+    // underline; without pending text a '-' run falls through to a rule.
+    if (ParagraphText <> '') and IsSetextUnderline(Lines[I], Level) then
+    begin
+      Block := NewBlock(bkHeading, Trim(ParagraphText), ParagraphStartLine);
+      Block.Level := Level;
+      Result.Add(Block);
+      ParagraphText := '';
+      ParagraphStartLine := -1;
+      PrevHardBreak := False;
+      Inc(I);
+      Continue;
+    end;
+
     if TryParseLinkReference(Lines[I], ReferenceName, ReferenceUrl) then
     begin
       CommitParagraph;
@@ -616,6 +659,27 @@ begin
   Result := (Index = 1) or CharInSet(Text[Index - 1], [' ', #9, '(', '[', '{', '<', '>', '"', '''']);
 end;
 
+// A loose check that S looks like an email address: a single @ with text on
+// both sides, a dot in the domain, and no whitespace or angle brackets.
+function LooksLikeEmail(const S: string): Boolean;
+var
+  AtPos: Integer;
+  I: Integer;
+begin
+  Result := False;
+  AtPos := Pos('@', S);
+  if (AtPos <= 1) or (AtPos >= Length(S)) then
+    Exit;
+  if Pos('@', Copy(S, AtPos + 1, MaxInt)) > 0 then
+    Exit; // more than one @
+  if Pos('.', Copy(S, AtPos + 1, MaxInt)) = 0 then
+    Exit; // no dot in the domain
+  for I := 1 to Length(S) do
+    if CharInSet(S[I], [' ', #9, #13, #10, '<', '>']) then
+      Exit;
+  Result := True;
+end;
+
 function TryReadAutoLink(const Text: string; Index: Integer; out DisplayText, Url: string;
   out NextIndex: Integer): Boolean;
 var
@@ -627,16 +691,25 @@ begin
   Url := '';
   NextIndex := Index;
 
-  if (Text[Index] = '<') and
-    (StartsText('http://', Copy(Text, Index + 1, MaxInt)) or StartsText('https://', Copy(Text, Index + 1, MaxInt))) then
+  if Text[Index] = '<' then
   begin
     I := PosEx('>', Text, Index + 1);
     if I > Index + 1 then
     begin
       DisplayText := Copy(Text, Index + 1, I - Index - 1);
-      Url := DisplayText;
-      NextIndex := I + 1;
-      Exit(True);
+      if StartsText('http://', DisplayText) or StartsText('https://', DisplayText) then
+      begin
+        Url := DisplayText;
+        NextIndex := I + 1;
+        Exit(True);
+      end;
+      if LooksLikeEmail(DisplayText) then
+      begin
+        Url := 'mailto:' + DisplayText;
+        NextIndex := I + 1;
+        Exit(True);
+      end;
+      DisplayText := '';
     end;
   end;
 
@@ -668,6 +741,56 @@ begin
   Result := True;
 end;
 
+// Decodes an HTML entity beginning at Text[Index] ('&'). On success returns the
+// decoded text, advances Index past the trailing ';', and returns True. Numeric
+// (&#169; / &#xA9;) and a set of common named entities are supported.
+function TryDecodeEntity(const Text: string; var Index: Integer;
+  out Decoded: string): Boolean;
+const
+  Names: array[0..23, 0..1] of string = (
+    ('amp', '&'), ('lt', '<'), ('gt', '>'), ('quot', '"'), ('apos', ''''),
+    ('nbsp', #$00A0), ('copy', #$00A9), ('reg', #$00AE), ('trade', #$2122),
+    ('mdash', #$2014), ('ndash', #$2013), ('hellip', #$2026), ('deg', #$00B0),
+    ('plusmn', #$00B1), ('times', #$00D7), ('divide', #$00F7), ('euro', #$20AC),
+    ('pound', #$00A3), ('cent', #$00A2), ('yen', #$00A5), ('sect', #$00A7),
+    ('middot', #$00B7), ('laquo', #$00AB), ('raquo', #$00BB));
+var
+  SemiPos: Integer;
+  Body: string;
+  Code: Integer;
+  I: Integer;
+begin
+  Result := False;
+  Decoded := '';
+  SemiPos := PosEx(';', Text, Index + 1);
+  if (SemiPos = 0) or (SemiPos - Index > 32) then
+    Exit;
+  Body := Copy(Text, Index + 1, SemiPos - Index - 1);
+  if Body = '' then
+    Exit;
+
+  if Body[1] = '#' then
+  begin
+    if (Length(Body) > 1) and (UpCase(Body[2]) = 'X') then
+      Code := StrToIntDef('$' + Copy(Body, 3, MaxInt), -1)
+    else
+      Code := StrToIntDef(Copy(Body, 2, MaxInt), -1);
+    if (Code < 1) or (Code > $FFFF) then
+      Exit;
+    Decoded := Char(Code);
+    Index := SemiPos + 1;
+    Exit(True);
+  end;
+
+  for I := Low(Names) to High(Names) do
+    if Names[I, 0] = Body then
+    begin
+      Decoded := Names[I, 1];
+      Index := SemiPos + 1;
+      Exit(True);
+    end;
+end;
+
 // Strips an optional "title" from a link destination, e.g. (url "title").
 function LinkDestination(const Inside: string): string;
 var
@@ -694,6 +817,7 @@ var
   Marker: string;
   ReferenceName: string;
   LinkUrl: string;
+  Decoded: string;
 
   procedure FlushBuffer;
   begin
@@ -721,6 +845,12 @@ begin
       FlushBuffer;
       AddLineBreak(Tokens);
       Inc(I);
+      Continue;
+    end;
+
+    if (Text[I] = '&') and TryDecodeEntity(Text, I, Decoded) then
+    begin
+      Buffer := Buffer + Decoded;
       Continue;
     end;
 

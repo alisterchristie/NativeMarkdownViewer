@@ -66,6 +66,18 @@ type
     [Test]
     procedure ParseInlineEmitsHardLineBreakToken;
     [Test]
+    procedure ParseInlineDetectsEmailAutoLink;
+    [Test]
+    procedure ParseInlineDecodesHtmlEntities;
+    [Test]
+    procedure ParseInlineLeavesInvalidEntityLiteral;
+    [Test]
+    procedure IsSetextUnderlineRecognizesUnderlines;
+    [Test]
+    procedure ParseBlocksParsesSetextHeadings;
+    [Test]
+    procedure ParseBlocksKeepsRuleWithoutParagraph;
+    [Test]
     procedure ParseInlineLeavesUnterminatedEmphasisAsText;
     [Test]
     procedure ParseInlineLeavesUnterminatedCodeAsText;
@@ -605,6 +617,109 @@ begin
     Assert.AreEqual('https://two.example', References.Values['two']);
   finally
     References.Free;
+    Lines.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.ParseInlineDetectsEmailAutoLink;
+var
+  Tokens: TMarkDownInlineList;
+begin
+  Tokens := TMarkDownBlockParser.ParseInline('Mail <a@b.com> now');
+  try
+    Assert.AreEqual(3, Tokens.Count);
+    Assert.AreEqual('Mail ', Tokens[0].Text);
+    Assert.AreEqual('a@b.com', Tokens[1].Text);
+    Assert.AreEqual('mailto:a@b.com', Tokens[1].Url);
+    Assert.AreEqual(' now', Tokens[2].Text);
+  finally
+    Tokens.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.ParseInlineDecodesHtmlEntities;
+var
+  Tokens: TMarkDownInlineList;
+begin
+  Tokens := TMarkDownBlockParser.ParseInline('A &amp; B &copy; C &#169; D &#x2122;');
+  try
+    Assert.AreEqual(1, Tokens.Count);
+    Assert.AreEqual('A & B ' + #$00A9 + ' C ' + #$00A9 + ' D ' + #$2122,
+      Tokens[0].Text);
+  finally
+    Tokens.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.ParseInlineLeavesInvalidEntityLiteral;
+var
+  Tokens: TMarkDownInlineList;
+begin
+  Tokens := TMarkDownBlockParser.ParseInline('AT&T and R&D');
+  try
+    Assert.AreEqual(1, Tokens.Count);
+    Assert.AreEqual('AT&T and R&D', Tokens[0].Text);
+  finally
+    Tokens.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.IsSetextUnderlineRecognizesUnderlines;
+var
+  Level: Integer;
+begin
+  Assert.IsTrue(TMarkDownBlockParser.IsSetextUnderline('===', Level));
+  Assert.AreEqual(1, Level);
+  Assert.IsTrue(TMarkDownBlockParser.IsSetextUnderline('-----', Level));
+  Assert.AreEqual(2, Level);
+  Assert.IsFalse(TMarkDownBlockParser.IsSetextUnderline('-x-', Level));
+  Assert.IsFalse(TMarkDownBlockParser.IsSetextUnderline('', Level));
+end;
+
+procedure TMarkDownParserTests.ParseBlocksParsesSetextHeadings;
+var
+  Blocks: TMarkDownBlockList;
+  Lines: TStringList;
+begin
+  Lines := TStringList.Create;
+  Blocks := nil;
+  try
+    Lines.Add('Title One');
+    Lines.Add('===');
+    Lines.Add('');
+    Lines.Add('Title Two');
+    Lines.Add('---');
+    Blocks := TMarkDownBlockParser.ParseBlocks(Lines);
+    Assert.AreEqual(2, Blocks.Count);
+    Assert.IsTrue(Blocks[0].Kind = bkHeading);
+    Assert.AreEqual(1, Blocks[0].Level);
+    Assert.AreEqual('Title One', Blocks[0].Text);
+    Assert.IsTrue(Blocks[1].Kind = bkHeading);
+    Assert.AreEqual(2, Blocks[1].Level);
+    Assert.AreEqual('Title Two', Blocks[1].Text);
+  finally
+    Blocks.Free;
+    Lines.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.ParseBlocksKeepsRuleWithoutParagraph;
+var
+  Blocks: TMarkDownBlockList;
+  Lines: TStringList;
+begin
+  Lines := TStringList.Create;
+  Blocks := nil;
+  try
+    Lines.Add('text');
+    Lines.Add('');
+    Lines.Add('---');
+    Blocks := TMarkDownBlockParser.ParseBlocks(Lines);
+    Assert.AreEqual(2, Blocks.Count);
+    Assert.IsTrue(Blocks[0].Kind = bkParagraph);
+    Assert.IsTrue(Blocks[1].Kind = bkRule);
+  finally
+    Blocks.Free;
     Lines.Free;
   end;
 end;

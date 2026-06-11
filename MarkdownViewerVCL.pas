@@ -34,6 +34,7 @@ type
     FLinkColor: TColor;
     FCodeBackgroundColor: TColor;
     FQuoteBarColor: TColor;
+    FHeadingRuleColor: TColor;
     FSearchHighlightColor: TColor;
     FBasePath: string;
     FImageCache: TObjectDictionary<string, TPicture>;
@@ -78,6 +79,7 @@ type
     procedure SetBasePath(const Value: string);
     procedure SetCodeBackgroundColor(const Value: TColor);
     procedure SetCodeFontName(const Value: string);
+    procedure SetHeadingRuleColor(const Value: TColor);
     procedure ToggleTaskAtLine(SourceLine: Integer);
     procedure SetReadOnly(const Value: Boolean);
     procedure SetLinkColor(const Value: TColor);
@@ -127,6 +129,7 @@ type
     property CodeBackgroundColor: TColor read FCodeBackgroundColor write SetCodeBackgroundColor default $00F2F2F2;
     property CodeFontName: string read FCodeFontName write SetCodeFontName;
     property Constraints;
+    property HeadingRuleColor: TColor read FHeadingRuleColor write SetHeadingRuleColor default $00E1E1E1;
     property ReadOnly: Boolean read FReadOnly write SetReadOnly default True;
     property Enabled;
     property Font;
@@ -265,6 +268,7 @@ begin
   FLinkColor := clHighlight;
   FCodeBackgroundColor := $00F2F2F2;
   FQuoteBarColor := clSilver;
+  FHeadingRuleColor := $00E1E1E1;
   FSearchHighlightColor := $00BFFFFF;
   FMarkdown := TStringList.Create;
   FMarkdown.OnChange := MarkdownChanged;
@@ -2050,6 +2054,13 @@ begin
           Tokens := InlineTokensForBlock(Block);
           TokenHeight := DrawInline(Tokens, TextLeft, Y, ContentWidth, True, [fsBold],
             HeadingFontSizeDelta(Block.Level), taLeftJustify, StringOfChar('#', Block.Level) + ' ');
+          // Top-level headings get a subtle underline rule, like common renderers.
+          if (Block.Level <= 2) and (FHeadingRuleColor <> clNone) then
+          begin
+            Canvas.Pen.Color := FHeadingRuleColor;
+            Canvas.MoveTo(TextLeft, Y + TokenHeight + 3);
+            Canvas.LineTo(TextLeft + ContentWidth, Y + TokenHeight + 3);
+          end;
           Inc(Y, TokenHeight + ParagraphSpacing + 2);
         end;
       bkQuote:
@@ -2372,6 +2383,15 @@ begin
     FCodeFontName := Value;
     FEffectiveCodeFont := ResolveMonospaceFont(Value);
     InvalidateLayout;
+    Invalidate;
+  end;
+end;
+
+procedure TMarkDownViewer.SetHeadingRuleColor(const Value: TColor);
+begin
+  if FHeadingRuleColor <> Value then
+  begin
+    FHeadingRuleColor := Value;
     Invalidate;
   end;
 end;

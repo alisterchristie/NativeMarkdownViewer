@@ -131,7 +131,14 @@ This is a native **VCL** markdown viewer component. It paints markdown text dire
 - Hard line breaks: this line ends with two spaces
   so it continues on the next line in the same paragraph.
 
-Automatic links work too: https://www.embarcadero.com/ and <https://docwiki.embarcadero.com/>. [Reference-style links][docwiki] are resolved from definitions elsewhere, and the same reference can be reused, including this [DocWiki shortcut][docwiki].
+Automatic links work too: https://www.embarcadero.com/ and <https://docwiki.embarcadero.com/>. Email addresses such as <support@example.com> become mailto links. [Reference-style links][docwiki] are resolved from definitions elsewhere, and the same reference can be reused, including this [DocWiki shortcut][docwiki].
+
+HTML entities are decoded: &copy; 2024, 100&nbsp;&times;&nbsp;200, an em dash &mdash; a euro &#8364; and an &amp; itself.
+
+Setext heading underlines
+-------------------------
+
+A line underlined with `=` or `-` becomes a heading, so the line above renders as a second-level heading.
 
 > Block quotes stand out from the surrounding text. The component lives in the
 > package, but this demo creates it in code so it does not need to be installed.
