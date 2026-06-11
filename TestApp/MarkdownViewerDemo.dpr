@@ -8,11 +8,17 @@ uses
   MarkdownViewer.Parser in '..\MarkdownViewer.Parser.pas',
   MarkdownViewer.Renderer in '..\MarkdownViewer.Renderer.pas',
   Demo.IntroForm in 'Demo.IntroForm.pas' {frmIntro},
-  Demo.StreamingForm in 'Demo.StreamingForm.pas' {frmStreaming};
+  Demo.StreamingForm in 'Demo.StreamingForm.pas' {frmStreaming},
+  Vcl.Themes,
+  Vcl.Styles;
+
+{$R *.res}
 
 begin
   Application.Initialize;
   Application.MainFormOnTaskbar := True;
+  Application.Title := 'TMarkdownViewer Demo';
+  TStyleManager.TrySetStyle('Windows Modern SlateGray');
   Application.CreateForm(TfrmIntro, frmIntro);
   Application.Run;
 end.
