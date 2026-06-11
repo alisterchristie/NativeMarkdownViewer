@@ -185,7 +185,8 @@ To highlight matching text, assign `SearchText`:
 
 ```pascal
 Viewer.SearchText := 'markdown';
-Viewer.SearchHighlightColor := $00BFFFFF;
+// SearchHighlightColor auto-adapts to the background; set explicitly to override:
+// Viewer.SearchHighlightColor := $00BFFFFF;
 ```
 
 `FindNext` and `FindPrevious` move the selection to the next or previous match
