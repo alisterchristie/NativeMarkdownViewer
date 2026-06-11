@@ -16,7 +16,8 @@ This repository contains a Delphi VCL markdown viewer component package, a VCL d
   - `TestApp/Demo.MainForm.pas` - editor/preview demo
   - `TestApp/Demo.StreamingForm.pas` - incremental streaming demo
 - Tests: `DUnitX/MarkdownViewerTests.dproj`
-- Project group: `MarkdownGroup.groupproj` (package, demo, and tests)
+- Render tool: `Tools/MarkdownRender/MarkdownRender.dproj` - console app that renders a markdown file to a PNG (see Verifying Rendering)
+- Project group: `MarkdownGroup.groupproj` (package, demo, tests, and render tool)
 
 The component class is `TMarkDownViewer` in the `MarkdownViewerVCL` unit. The unit
 splits parsing, the document model, and rendering into the three `MarkdownViewer.*`
@@ -73,6 +74,21 @@ Build and run the DUnitX tests:
 MSBuild DUnitX\MarkdownViewerTests.dproj /t:Build /p:Config=Debug /p:Platform=Win32
 DUnitX\Win32\Debug\MarkdownViewerTests.exe --exitbehavior:Continue
 ```
+
+## Verifying Rendering
+
+To check how markdown actually renders without driving the GUI, use the
+`MarkdownRender` tool, which renders a markdown file to a PNG with the real
+`TMarkDownViewer`. This is the reliable way to confirm visual changes (heading
+rules, tables, images, spacing, etc.).
+
+```bat
+MSBuild Tools\MarkdownRender\MarkdownRender.dproj /t:Build /p:Config=Debug /p:Platform=Win32
+Tools\MarkdownRender\Win32\Debug\MarkdownRender.exe input.md output.png 800
+```
+
+Write a small markdown file exercising the feature under test, render it, then
+open the PNG. Prefer this over screenshotting the running demo.
 
 ## Coding Notes
 
