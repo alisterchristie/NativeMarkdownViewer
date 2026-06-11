@@ -310,10 +310,10 @@ var
 begin
   Viewer := TMarkDownViewer.Create(nil);
   try
-    Assert.AreEqual(Integer(clHighlight), Integer(Viewer.LinkColor));
+    Assert.AreEqual(Integer(clDefault), Integer(Viewer.LinkColor));
     Assert.AreEqual(Integer(clDefault), Integer(Viewer.CodeBackgroundColor));
-    Assert.AreEqual(Integer(clSilver), Integer(Viewer.QuoteBarColor));
-    Assert.AreEqual(Integer($00E1E1E1), Integer(Viewer.HeadingRuleColor));
+    Assert.AreEqual(Integer(clDefault), Integer(Viewer.QuoteBarColor));
+    Assert.AreEqual(Integer(clDefault), Integer(Viewer.HeadingRuleColor));
     Assert.AreEqual(Integer(clDefault), Integer(Viewer.SearchHighlightColor));
   finally
     Viewer.Free;

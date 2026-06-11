@@ -98,6 +98,9 @@ type
     function GetEffectiveTableHeaderColor: TColor;
     function GetEffectiveCodeBackgroundColor: TColor;
     function GetEffectiveSearchHighlightColor: TColor;
+    function GetEffectiveHeadingRuleColor: TColor;
+    function GetEffectiveQuoteBarColor: TColor;
+    function GetEffectiveLinkColor: TColor;
     function UseThemedColors: Boolean;
     procedure UpdateScrollBar;
     procedure WMEraseBkgnd(var Message: TMessage); message WM_ERASEBKGND;
@@ -141,16 +144,16 @@ type
     property CodeBackgroundColor: TColor read FCodeBackgroundColor write SetCodeBackgroundColor default clDefault;
     property CodeFontName: string read FCodeFontName write SetCodeFontName;
     property Constraints;
-    property HeadingRuleColor: TColor read FHeadingRuleColor write SetHeadingRuleColor default $00E1E1E1;
+    property HeadingRuleColor: TColor read FHeadingRuleColor write SetHeadingRuleColor default clDefault;
     property ReadOnly: Boolean read FReadOnly write SetReadOnly default True;
     property Enabled;
     property Font;
-    property LinkColor: TColor read FLinkColor write SetLinkColor default clHighlight;
+    property LinkColor: TColor read FLinkColor write SetLinkColor default clDefault;
     property Markdown: TStrings read GetMarkdown write SetMarkdown stored IsMarkdownStored;
     property ParentColor;
     property ParentFont;
     property PopupMenu;
-    property QuoteBarColor: TColor read FQuoteBarColor write SetQuoteBarColor default clSilver;
+    property QuoteBarColor: TColor read FQuoteBarColor write SetQuoteBarColor default clDefault;
     property SearchHighlightColor: TColor read FSearchHighlightColor write SetSearchHighlightColor default clDefault;
     property SearchText: string read FSearchText write SetSearchText;
     property ShowHint;
@@ -277,10 +280,10 @@ begin
   TabStop := True;
   Color := clWindow;
   ParentColor := False;
-  FLinkColor := clHighlight;
+  FLinkColor := clDefault;
   FCodeBackgroundColor := clDefault;
-  FQuoteBarColor := clSilver;
-  FHeadingRuleColor := $00E1E1E1;
+  FQuoteBarColor := clDefault;
+  FHeadingRuleColor := clDefault;
   FSearchHighlightColor := clDefault;
   FMarkdown := TStringList.Create;
   FMarkdown.OnChange := MarkdownChanged;
@@ -442,6 +445,29 @@ begin
     Result := RGB(Min(255, R + 20), Min(255, G + 20), Max(0, B - 40))
   else
     Result := RGB(Min(255, R + 64), Min(255, G + 64), Min(255, B + 72));
+end;
+
+function TMarkDownViewer.GetEffectiveHeadingRuleColor: TColor;
+begin
+  if FHeadingRuleColor = clNone then
+    Exit(clNone);
+  if FHeadingRuleColor <> clDefault then
+    Exit(FHeadingRuleColor);
+  Result := GetEffectiveCodeBackgroundColor;
+end;
+
+function TMarkDownViewer.GetEffectiveQuoteBarColor: TColor;
+begin
+  if FQuoteBarColor <> clDefault then
+    Exit(FQuoteBarColor);
+  Result := GetEffectiveGridlineColor;
+end;
+
+function TMarkDownViewer.GetEffectiveLinkColor: TColor;
+begin
+  if FLinkColor <> clDefault then
+    Exit(FLinkColor);
+  Result := GetEffectiveSelectionBackground;
 end;
 
 procedure TMarkDownViewer.ClearInlineTokenCaches;
@@ -1746,7 +1772,7 @@ var
       Canvas.Font.Style := BaseStyle + Token.Style;
     if Token.Url <> '' then
     begin
-      Canvas.Font.Color := FLinkColor;
+      Canvas.Font.Color := GetEffectiveLinkColor;
       Canvas.Font.Style := Canvas.Font.Style + [fsUnderline];
     end
     else if UseThemedColors then
@@ -2185,9 +2211,9 @@ begin
           TokenHeight := DrawInline(Tokens, TextLeft, Y, ContentWidth, True, [fsBold],
             HeadingFontSizeDelta(Block.Level), taLeftJustify, StringOfChar('#', Block.Level) + ' ');
           // Top-level headings get a subtle underline rule, like common renderers.
-          if (Block.Level <= 2) and (FHeadingRuleColor <> clNone) then
+          if (Block.Level <= 2) and (GetEffectiveHeadingRuleColor <> clNone) then
           begin
-            Canvas.Pen.Color := FHeadingRuleColor;
+            Canvas.Pen.Color := GetEffectiveHeadingRuleColor;
             Canvas.MoveTo(TextLeft, Y + TokenHeight + 3);
             Canvas.LineTo(TextLeft + ContentWidth, Y + TokenHeight + 3);
           end;
@@ -2201,7 +2227,7 @@ begin
           R := Rect(TextLeft, Y + 2, TextLeft + 4, Y + TokenHeight);
           CanvasState := TCanvasState.Save(Canvas);
           try
-            Canvas.Brush.Color := FQuoteBarColor;
+            Canvas.Brush.Color := GetEffectiveQuoteBarColor;
             Canvas.FillRect(R);
           finally
             CanvasState.Restore;
