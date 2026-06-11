@@ -2224,7 +2224,12 @@ begin
         end;
       bkTable:
         begin
-          TokenHeight := DrawTable(Block.Text, TextLeft, Y, ContentWidth);
+          CanvasState := TCanvasState.Save(Canvas);
+          try
+            TokenHeight := DrawTable(Block.Text, TextLeft, Y, ContentWidth);
+          finally
+            CanvasState.Restore;
+          end;
           Inc(Y, TokenHeight + ParagraphSpacing);
         end;
       bkCodeBlock:
@@ -2236,32 +2241,37 @@ begin
             Lines.Text := Block.Text;
             TokenHeight := Max(1, Lines.Count) * LineHeight + 16;
             R := Rect(TextLeft, Y + 2, TextLeft + ContentWidth, Y + TokenHeight);
-            Canvas.Brush.Color := FCodeBackgroundColor;
-            Canvas.FillRect(R);
-            Canvas.Brush.Style := bsClear;
-            for LineIndex := 0 to Lines.Count - 1 do
-            begin
-              LineTextStart := AddSelectableRun(
-                Rect(TextLeft + 8, Y + 8 + (LineIndex * LineHeight),
-                  TextLeft + 8 + Canvas.TextWidth(Lines[LineIndex]),
-                  Y + 8 + (LineIndex * LineHeight) + LineHeight),
-                Lines[LineIndex]);
-              if (Y + 8 + (LineIndex * LineHeight) + LineHeight >= 0) and
-                (Y + 8 + (LineIndex * LineHeight) <= ClientHeight) then
+            CanvasState := TCanvasState.Save(Canvas);
+            try
+              Canvas.Brush.Color := FCodeBackgroundColor;
+              Canvas.FillRect(R);
+              Canvas.Brush.Style := bsClear;
+              for LineIndex := 0 to Lines.Count - 1 do
               begin
-                DrawSelectionBackground(Lines[LineIndex], TextLeft + 8,
-                  Y + 8 + (LineIndex * LineHeight), LineHeight, LineTextStart);
-                OldBkMode := SetBkMode(Canvas.Handle, TRANSPARENT);
-                DrawSelectableText(Lines[LineIndex], TextLeft + 8,
-                  Y + 8 + (LineIndex * LineHeight), LineTextStart);
-                SetBkMode(Canvas.Handle, OldBkMode);
+                LineTextStart := AddSelectableRun(
+                  Rect(TextLeft + 8, Y + 8 + (LineIndex * LineHeight),
+                    TextLeft + 8 + Canvas.TextWidth(Lines[LineIndex]),
+                    Y + 8 + (LineIndex * LineHeight) + LineHeight),
+                  Lines[LineIndex]);
+                if (Y + 8 + (LineIndex * LineHeight) + LineHeight >= 0) and
+                  (Y + 8 + (LineIndex * LineHeight) <= ClientHeight) then
+                begin
+                  DrawSelectionBackground(Lines[LineIndex], TextLeft + 8,
+                    Y + 8 + (LineIndex * LineHeight), LineHeight, LineTextStart);
+                  OldBkMode := SetBkMode(Canvas.Handle, TRANSPARENT);
+                  DrawSelectableText(Lines[LineIndex], TextLeft + 8,
+                    Y + 8 + (LineIndex * LineHeight), LineTextStart);
+                  SetBkMode(Canvas.Handle, OldBkMode);
+                end;
+                // Unconditional break so blank code lines survive in the
+                // selectable text (AddSelectableBreak collapses repeats).
+                if LineIndex < Lines.Count - 1 then
+                  AddSelectableText(sLineBreak);
               end;
-              // Unconditional break so blank code lines survive in the
-              // selectable text (AddSelectableBreak collapses repeats).
-              if LineIndex < Lines.Count - 1 then
-                AddSelectableText(sLineBreak);
+              Canvas.Brush.Style := bsSolid;
+            finally
+              CanvasState.Restore;
             end;
-            Canvas.Brush.Style := bsSolid;
           finally
             Lines.Free;
           end;
