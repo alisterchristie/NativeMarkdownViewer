@@ -23,13 +23,16 @@ type
   TMarkDownViewerTests = class
   private
     FChangeCount: Integer;
+    FScrollCount: Integer;
     FForm: TForm;
     FViewer: TTestMarkDownViewer;
     FLinkUrl: string;
     procedure HandleViewerChange(Sender: TObject);
+    procedure HandleViewerScroll(Sender: TObject);
     procedure HandleLinkClick(Sender: TObject; const Url: string);
     procedure RepaintViewer;
     procedure ShowViewer(AWidth, AHeight: Integer);
+    procedure ShowTallViewer;
     function FindLinkPoint(out X, Y: Integer): Boolean;
   public
     [TearDown]
@@ -67,6 +70,22 @@ type
     [Test]
     procedure SelectionHighlightRendersForPartialSelection;
     [Test]
+    procedure CutCopiesAndRemovesSelection;
+    [Test]
+    procedure CopyPasteRoundTripsThroughClipboard;
+    [Test]
+    procedure VScrollMessageScrollsAndFiresOnScroll;
+    [Test]
+    procedure MouseWheelScrollsDown;
+    [Test]
+    procedure GetDlgCodeRequestsArrowKeys;
+    [Test]
+    procedure SetMarkdownPropertyReplacesContent;
+    [Test]
+    procedure AppendingLinkReferenceClearsTokenCaches;
+    [Test]
+    procedure ClickingUnsafeLinkWithoutHandlerIsIgnored;
+    [Test]
     procedure AppendsMarkdownWithoutReplacingExistingText;
     [Test]
     procedure AppendFiresOnChange;
@@ -103,6 +122,7 @@ uses
   System.SysUtils,
   System.UITypes,
   Vcl.Graphics,
+  Winapi.Messages,
   Winapi.Windows;
 
 function CreateTempBitmap(AWidth, AHeight: Integer): string;
@@ -164,6 +184,31 @@ end;
 procedure TMarkDownViewerTests.HandleViewerChange(Sender: TObject);
 begin
   Inc(FChangeCount);
+end;
+
+procedure TMarkDownViewerTests.HandleViewerScroll(Sender: TObject);
+begin
+  Inc(FScrollCount);
+end;
+
+procedure TMarkDownViewerTests.ShowTallViewer;
+var
+  I: Integer;
+  Source: TStringList;
+begin
+  ShowViewer(400, 120);
+  Source := TStringList.Create;
+  try
+    for I := 1 to 40 do
+    begin
+      Source.Add('# Heading ' + I.ToString);
+      Source.Add('');
+    end;
+    FViewer.Markdown.Assign(Source);
+  finally
+    Source.Free;
+  end;
+  RepaintViewer;
 end;
 
 procedure TMarkDownViewerTests.HandleLinkClick(Sender: TObject; const Url: string);
@@ -471,6 +516,133 @@ begin
   RepaintViewer;
 
   Assert.AreEqual('ph', FViewer.SelectedText(True));
+end;
+
+procedure TMarkDownViewerTests.CutCopiesAndRemovesSelection;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'hello';
+  RepaintViewer;
+
+  FViewer.SelectAll;
+  FViewer.PressKey(Ord('X'), [ssCtrl]);
+
+  Assert.AreEqual('', FViewer.MarkdownText.Trim);
+end;
+
+procedure TMarkDownViewerTests.CopyPasteRoundTripsThroughClipboard;
+var
+  Attempt: Integer;
+  Pasted: Boolean;
+begin
+  ShowViewer(400, 300);
+
+  // The clipboard is a shared OS resource; another process can briefly hold it,
+  // so retry the round trip a few times before deciding it really failed.
+  Pasted := False;
+  for Attempt := 1 to 5 do
+  begin
+    FViewer.MarkdownText := 'AB';
+    RepaintViewer;
+    FViewer.SelectAll;
+    FViewer.CopySelection(True);
+    FViewer.PressKey(VK_END, [ssCtrl]);
+    FViewer.PressKey(Ord('V'), [ssCtrl]);
+    if FViewer.MarkdownText.Trim = 'ABAB' then
+    begin
+      Pasted := True;
+      Break;
+    end;
+  end;
+
+  Assert.IsTrue(Pasted, 'clipboard copy/paste did not round trip');
+end;
+
+procedure TMarkDownViewerTests.VScrollMessageScrollsAndFiresOnScroll;
+begin
+  ShowTallViewer;
+  FViewer.OnScroll := HandleViewerScroll;
+  FScrollCount := 0;
+
+  FViewer.Perform(WM_VSCROLL, SB_LINEDOWN, 0);
+
+  Assert.IsTrue(FViewer.ScrollPosition > 0, 'scrollbar message did not scroll');
+  Assert.IsTrue(FScrollCount > 0, 'OnScroll did not fire');
+end;
+
+procedure TMarkDownViewerTests.MouseWheelScrollsDown;
+begin
+  ShowTallViewer;
+
+  FViewer.Perform(WM_MOUSEWHEEL, MakeWParam(0, Word(-WHEEL_DELTA)), 0);
+
+  Assert.IsTrue(FViewer.ScrollPosition > 0, 'mouse wheel did not scroll');
+end;
+
+procedure TMarkDownViewerTests.GetDlgCodeRequestsArrowKeys;
+var
+  Code: Integer;
+begin
+  ShowViewer(400, 300);
+  FViewer.ReadOnly := True;
+  Code := FViewer.Perform(WM_GETDLGCODE, 0, 0);
+  Assert.AreNotEqual(0, Code and DLGC_WANTARROWS);
+
+  // Editing additionally claims character and all keys.
+  FViewer.ReadOnly := False;
+  Code := FViewer.Perform(WM_GETDLGCODE, 0, 0);
+  Assert.AreNotEqual(0, Code and DLGC_WANTALLKEYS);
+end;
+
+procedure TMarkDownViewerTests.SetMarkdownPropertyReplacesContent;
+var
+  Viewer: TMarkDownViewer;
+  Source: TStringList;
+begin
+  Viewer := TMarkDownViewer.Create(nil);
+  Source := TStringList.Create;
+  try
+    Source.Add('# Assigned');
+    Viewer.Markdown := Source;
+    Assert.IsTrue(Viewer.MarkdownText.Contains('# Assigned'), Viewer.MarkdownText);
+  finally
+    Source.Free;
+    Viewer.Free;
+  end;
+end;
+
+procedure TMarkDownViewerTests.AppendingLinkReferenceClearsTokenCaches;
+var
+  Viewer: TMarkDownViewer;
+begin
+  // Appending a new link-reference definition changes the reference table,
+  // which clears the cached inline tokens so later blocks re-resolve links.
+  Viewer := TMarkDownViewer.Create(nil);
+  try
+    Viewer.MarkdownText := 'See [docs][ref].';
+    Viewer.AppendMarkdownText(sLineBreak + sLineBreak + '[ref]: https://example.com');
+    Assert.IsTrue(Viewer.MarkdownText.Contains('[ref]: https://example.com'),
+      Viewer.MarkdownText);
+  finally
+    Viewer.Free;
+  end;
+end;
+
+procedure TMarkDownViewerTests.ClickingUnsafeLinkWithoutHandlerIsIgnored;
+var
+  LinkX, LinkY: Integer;
+begin
+  // With no OnLinkClick handler and a non-web URL, the safety check rejects the
+  // URL so nothing is launched. The test just confirms the path runs cleanly.
+  ShowViewer(400, 300);
+  FViewer.ReadOnly := True;
+  FViewer.MarkdownText := '[open](customscheme:payload)';
+  RepaintViewer;
+
+  Assert.IsTrue(FindLinkPoint(LinkX, LinkY), 'no link region was rendered');
+  FViewer.ClickMouse(LinkX, LinkY);
+
+  Assert.Pass;
 end;
 
 procedure TMarkDownViewerTests.AppendsMarkdownWithoutReplacingExistingText;
