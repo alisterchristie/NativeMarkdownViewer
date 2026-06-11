@@ -10,6 +10,7 @@ uses
   Winapi.Windows,
   Vcl.Controls,
   Vcl.Graphics,
+  Vcl.Themes,
   MarkdownViewer.Model;
 
 type
@@ -89,12 +90,20 @@ type
     procedure SetSearchHighlightColor(const Value: TColor);
     procedure SetSearchText(const Value: string);
     procedure SetScrollPosition(const Value: Integer);
+    function GetEffectiveBackground: TColor;
+    function GetEffectiveTextColor: TColor;
+    function GetEffectiveSelectionBackground: TColor;
+    function GetEffectiveSelectionTextColor: TColor;
+    function GetEffectiveGridlineColor: TColor;
+    function GetEffectiveTableHeaderColor: TColor;
+    function UseThemedColors: Boolean;
     procedure UpdateScrollBar;
     procedure WMEraseBkgnd(var Message: TMessage); message WM_ERASEBKGND;
     procedure WMGetDlgCode(var Message: TMessage); message WM_GETDLGCODE;
     procedure WMVScroll(var Message: TWMVScroll); message WM_VSCROLL;
     procedure WMMouseWheel(var Message: TWMMouseWheel); message WM_MOUSEWHEEL;
     procedure CMFontChanged(var Message: TMessage); message CM_FONTCHANGED;
+    procedure CMStyleChanged(var Message: TMessage); message CM_STYLECHANGED;
   protected
     procedure CreateParams(var Params: TCreateParams); override;
     procedure KeyDown(var Key: Word; Shift: TShiftState); override;
@@ -104,6 +113,7 @@ type
     procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: Integer); override;
     procedure Paint; override;
     procedure Resize; override;
+    procedure SetStyleElements(const Value: TStyleElements); override;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -288,6 +298,7 @@ begin
   FRedoStack := TStringList.Create;
   FDesiredCaretX := -1;
   FReadOnly := True;
+  StyleElements := [seFont, seClient];
   Font.Size := 10;
 end;
 
@@ -318,6 +329,75 @@ begin
   inherited;
   InvalidateLayout;
   Invalidate;
+end;
+
+procedure TMarkDownViewer.CMStyleChanged(var Message: TMessage);
+begin
+  inherited;
+  InvalidateLayout;
+  Invalidate;
+end;
+
+procedure TMarkDownViewer.SetStyleElements(const Value: TStyleElements);
+begin
+  if StyleElements <> Value then
+  begin
+    inherited SetStyleElements(Value);
+    Invalidate;
+  end;
+end;
+
+function TMarkDownViewer.UseThemedColors: Boolean;
+begin
+  Result := TStyleManager.IsCustomStyleActive and (seClient in StyleElements);
+end;
+
+function TMarkDownViewer.GetEffectiveBackground: TColor;
+begin
+  if UseThemedColors then
+    Result := StyleServices.GetSystemColor(clWindow)
+  else
+    Result := Color;
+end;
+
+function TMarkDownViewer.GetEffectiveTextColor: TColor;
+begin
+  if UseThemedColors then
+    Result := StyleServices.GetSystemColor(clWindowText)
+  else
+    Result := Font.Color;
+end;
+
+function TMarkDownViewer.GetEffectiveSelectionBackground: TColor;
+begin
+  if TStyleManager.IsCustomStyleActive then
+    Result := StyleServices.GetSystemColor(clHighlight)
+  else
+    Result := clHighlight;
+end;
+
+function TMarkDownViewer.GetEffectiveSelectionTextColor: TColor;
+begin
+  if TStyleManager.IsCustomStyleActive then
+    Result := StyleServices.GetSystemColor(clHighlightText)
+  else
+    Result := clHighlightText;
+end;
+
+function TMarkDownViewer.GetEffectiveGridlineColor: TColor;
+begin
+  if UseThemedColors then
+    Result := StyleServices.GetSystemColor(clBtnShadow)
+  else
+    Result := clSilver;
+end;
+
+function TMarkDownViewer.GetEffectiveTableHeaderColor: TColor;
+begin
+  if UseThemedColors then
+    Result := StyleServices.GetSystemColor(clBtnFace)
+  else
+    Result := $00F7F7F7;
 end;
 
 procedure TMarkDownViewer.ClearInlineTokenCaches;
@@ -1512,7 +1592,7 @@ var
     Canvas.Font.Style := Run.FontStyle;
     X := Run.Rect.Left + Canvas.TextWidth(Copy(Run.Text, 1,
       EnsureRange(CaretPosition - Run.StartIndex, 0, Length(Run.Text))));
-    Canvas.Pen.Color := Font.Color;
+    Canvas.Pen.Color := GetEffectiveTextColor;
     Canvas.MoveTo(X, Run.Rect.Top + 1);
     Canvas.LineTo(X, Run.Rect.Bottom - 1);
   end;
@@ -1543,7 +1623,7 @@ var
 
     OldColor := Canvas.Brush.Color;
     OldStyle := Canvas.Brush.Style;
-    Canvas.Brush.Color := clHighlight;
+    Canvas.Brush.Color := GetEffectiveSelectionBackground;
     Canvas.Brush.Style := bsSolid;
     Canvas.FillRect(HighlightRect);
     Canvas.Brush.Color := OldColor;
@@ -1588,7 +1668,7 @@ var
     end;
 
     OldFontColor := Canvas.Font.Color;
-    Canvas.Font.Color := clHighlightText;
+    Canvas.Font.Color := GetEffectiveSelectionTextColor;
     Canvas.TextOut(XPos, TextY, SelectedText);
     Canvas.Font.Color := OldFontColor;
     Inc(XPos, Canvas.TextWidth(SelectedText));
@@ -1604,6 +1684,8 @@ var
     Canvas.Font.Size := Max(1, Font.Size + SizeDelta);
     if FontName <> '' then
       Canvas.Font.Name := FontName;
+    if UseThemedColors then
+      Canvas.Font.Color := GetEffectiveTextColor;
   end;
 
   procedure AssignInlineFont(const Token: TMarkDownInlineToken; BaseStyle: TFontStyles; SizeDelta: Integer);
@@ -1622,7 +1704,9 @@ var
     begin
       Canvas.Font.Color := FLinkColor;
       Canvas.Font.Style := Canvas.Font.Style + [fsUnderline];
-    end;
+    end
+    else if UseThemedColors then
+      Canvas.Font.Color := GetEffectiveTextColor;
   end;
 
   function DrawInline(ATokens: TMarkDownInlineList; ALeft, ATop, AWidth: Integer; ADraw: Boolean;
@@ -1835,6 +1919,8 @@ var
     begin
       Canvas.Font.Assign(Font);
       Canvas.Font.Style := [fsItalic];
+      if UseThemedColors then
+        Canvas.Font.Color := GetEffectiveTextColor;
       TextRect := Rect(ALeft, ATop, ALeft + AWidth, ATop + Result);
       OldBkMode := SetBkMode(Canvas.Handle, TRANSPARENT);
       DrawText(Canvas.Handle, PChar(AltText), Length(AltText), TextRect, DT_LEFT or DT_VCENTER or DT_SINGLELINE or DT_END_ELLIPSIS);
@@ -1982,11 +2068,11 @@ var
         begin
           CellRect := Rect(X, RowTop, X + ColWidths[Col], RowTop + RowHeight);
           if SourceIndex = 0 then
-            Canvas.Brush.Color := $00F7F7F7
+            Canvas.Brush.Color := GetEffectiveTableHeaderColor
           else
-            Canvas.Brush.Color := Color;
+            Canvas.Brush.Color := GetEffectiveBackground;
           Canvas.FillRect(CellRect);
-          Canvas.Pen.Color := clSilver;
+          Canvas.Pen.Color := GetEffectiveGridlineColor;
           Canvas.Brush.Style := bsClear;
           Canvas.Rectangle(CellRect);
           Canvas.Brush.Style := bsSolid;
@@ -2024,7 +2110,7 @@ var
   end;
 
 begin
-  Canvas.Brush.Color := Color;
+  Canvas.Brush.Color := GetEffectiveBackground;
   Canvas.FillRect(ClientRect);
 
   FLinkHits.Clear;
@@ -2183,7 +2269,7 @@ begin
         end;
       bkRule:
         begin
-          Canvas.Pen.Color := clSilver;
+          Canvas.Pen.Color := GetEffectiveGridlineColor;
           Canvas.MoveTo(TextLeft, Y + 8);
           Canvas.LineTo(TextLeft + ContentWidth, Y + 8);
           Inc(Y, 18);
