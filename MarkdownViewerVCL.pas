@@ -87,6 +87,10 @@ type
       TextX, TextY, TextHeight, TextStart: Integer);
     procedure DrawSelectableText(const AText: string;
       TextX, TextY, TextStart: Integer);
+    procedure AssignBaseFont(Style: TFontStyles; SizeDelta: Integer;
+      const FontName: string = '');
+    procedure AssignInlineFont(const Token: TMarkDownInlineToken;
+      BaseStyle: TFontStyles; SizeDelta: Integer);
     procedure ClearSelection;
     procedure ClearInlineTokenCaches;
     procedure CopySelectionToClipboard(PlainText: Boolean);
@@ -1780,6 +1784,45 @@ begin
     Canvas.TextOut(XPos, TextY, SuffixText);
 end;
 
+// Reset the canvas font to the control's base font with a style and size delta,
+// optionally a different face (used for code).
+procedure TMarkDownViewer.AssignBaseFont(Style: TFontStyles; SizeDelta: Integer;
+  const FontName: string);
+begin
+  Canvas.Font.Assign(Font);
+  Canvas.Font.Style := Style;
+  Canvas.Font.Size := Max(1, Font.Size + SizeDelta);
+  if FontName <> '' then
+    Canvas.Font.Name := FontName;
+  if UseThemedColors then
+    Canvas.Font.Color := GetEffectiveTextColor;
+end;
+
+// Set the canvas font for a single inline token, combining the block's base
+// style with the token's emphasis, switching to the code face for code spans
+// and to the link colour (underlined) for links.
+procedure TMarkDownViewer.AssignInlineFont(const Token: TMarkDownInlineToken;
+  BaseStyle: TFontStyles; SizeDelta: Integer);
+begin
+  Canvas.Font.Assign(Font);
+  Canvas.Font.Size := Max(1, Font.Size + SizeDelta);
+  if Token.IsCode then
+  begin
+    // Code keeps its own emphasis but not the surrounding block style.
+    Canvas.Font.Name := FEffectiveCodeFont;
+    Canvas.Font.Style := Token.Style;
+  end
+  else
+    Canvas.Font.Style := BaseStyle + Token.Style;
+  if Token.Url <> '' then
+  begin
+    Canvas.Font.Color := GetEffectiveLinkColor;
+    Canvas.Font.Style := Canvas.Font.Style + [fsUnderline];
+  end
+  else if UseThemedColors then
+    Canvas.Font.Color := GetEffectiveTextColor;
+end;
+
 procedure TMarkDownViewer.Paint;
 var
   Blocks: TMarkDownBlockList;
@@ -1813,38 +1856,6 @@ var
       ABlock.InlineTokens := TMarkDownBlockParser.ParseInline(ABlock.Text,
         FLinkReferences, ABlock.SourceMap);
     Result := ABlock.InlineTokens;
-  end;
-
-  procedure AssignBaseFont(Style: TFontStyles; SizeDelta: Integer; const FontName: string = '');
-  begin
-    Canvas.Font.Assign(Font);
-    Canvas.Font.Style := Style;
-    Canvas.Font.Size := Max(1, Font.Size + SizeDelta);
-    if FontName <> '' then
-      Canvas.Font.Name := FontName;
-    if UseThemedColors then
-      Canvas.Font.Color := GetEffectiveTextColor;
-  end;
-
-  procedure AssignInlineFont(const Token: TMarkDownInlineToken; BaseStyle: TFontStyles; SizeDelta: Integer);
-  begin
-    Canvas.Font.Assign(Font);
-    Canvas.Font.Size := Max(1, Font.Size + SizeDelta);
-    if Token.IsCode then
-    begin
-      // Code keeps its own emphasis but not the surrounding block style.
-      Canvas.Font.Name := FEffectiveCodeFont;
-      Canvas.Font.Style := Token.Style;
-    end
-    else
-      Canvas.Font.Style := BaseStyle + Token.Style;
-    if Token.Url <> '' then
-    begin
-      Canvas.Font.Color := GetEffectiveLinkColor;
-      Canvas.Font.Style := Canvas.Font.Style + [fsUnderline];
-    end
-    else if UseThemedColors then
-      Canvas.Font.Color := GetEffectiveTextColor;
   end;
 
   function DrawInline(ATokens: TMarkDownInlineList; ALeft, ATop, AWidth: Integer; ADraw: Boolean;
