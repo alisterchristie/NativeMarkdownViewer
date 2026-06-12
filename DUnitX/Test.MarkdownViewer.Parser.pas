@@ -127,6 +127,14 @@ type
     procedure TokenMapHandlesEntity;
     [Test]
     procedure TokenMapHandlesAutoLink;
+    [Test]
+    procedure SourceMapHandlesListItem;
+    [Test]
+    procedure SourceMapHandlesImageAlt;
+    [Test]
+    procedure SourceMapHandlesCodeBlock;
+    [Test]
+    procedure SourceMapHandlesTable;
   end;
 
 implementation
@@ -1165,6 +1173,91 @@ begin
     Assert.AreEqual(5, Tokens[1].SourceMap[0]);
   finally
     Tokens.Free;
+    Blocks.Free;
+    Lines.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.SourceMapHandlesListItem;
+var
+  Blocks: TMarkDownBlockList;
+  Lines: TStringList;
+begin
+  Lines := TStringList.Create;
+  Blocks := nil;
+  try
+    Lines.Add('- buy **milk**');
+    Blocks := TMarkDownBlockParser.ParseBlocks(Lines);
+    Assert.IsTrue(Blocks[0].Kind = bkListItem);
+    Assert.AreEqual('buy **milk**', Blocks[0].Text);
+    AssertSourceMapValid(Lines, Blocks[0]);
+    Assert.AreEqual(2, Blocks[0].SourceMap[0]);
+  finally
+    Blocks.Free;
+    Lines.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.SourceMapHandlesImageAlt;
+var
+  Blocks: TMarkDownBlockList;
+  Lines: TStringList;
+begin
+  Lines := TStringList.Create;
+  Blocks := nil;
+  try
+    Lines.Add('![a cat](cat.png)');
+    Blocks := TMarkDownBlockParser.ParseBlocks(Lines);
+    Assert.IsTrue(Blocks[0].Kind = bkImage);
+    Assert.AreEqual('a cat', Blocks[0].Text);
+    AssertSourceMapValid(Lines, Blocks[0]);
+    Assert.AreEqual(2, Blocks[0].SourceMap[0]);
+  finally
+    Blocks.Free;
+    Lines.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.SourceMapHandlesCodeBlock;
+var
+  Blocks: TMarkDownBlockList;
+  Lines: TStringList;
+begin
+  Lines := TStringList.Create;
+  Blocks := nil;
+  try
+    Lines.Add('```');
+    Lines.Add('one');
+    Lines.Add('two');
+    Lines.Add('```');
+    Blocks := TMarkDownBlockParser.ParseBlocks(Lines);
+    Assert.IsTrue(Blocks[0].Kind = bkCodeBlock);
+    Assert.AreEqual('one'#13#10'two', Blocks[0].Text);
+    AssertSourceMapValid(Lines, Blocks[0]);
+    // 'one' starts on the second source line (after the fence + CRLF).
+    Assert.AreEqual(Length('```') + 2, Blocks[0].SourceMap[0]);
+  finally
+    Blocks.Free;
+    Lines.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.SourceMapHandlesTable;
+var
+  Blocks: TMarkDownBlockList;
+  Lines: TStringList;
+begin
+  Lines := TStringList.Create;
+  Blocks := nil;
+  try
+    Lines.Add('| a | b |');
+    Lines.Add('| --- | --- |');
+    Lines.Add('| 1 | 2 |');
+    Blocks := TMarkDownBlockParser.ParseBlocks(Lines);
+    Assert.IsTrue(Blocks[0].Kind = bkTable);
+    AssertSourceMapValid(Lines, Blocks[0]);
+    Assert.AreEqual(0, Blocks[0].SourceMap[0]);
+  finally
     Blocks.Free;
     Lines.Free;
   end;

@@ -623,6 +623,60 @@ var
     Map.Add(LineBase[LineIdx] + Length(Lines[LineIdx]));
   end;
 
+  // Append the two synthetic characters of a CRLF join (used where blocks keep
+  // lines verbatim, joined by sLineBreak), mapped to the CR and LF positions.
+  procedure AddCrLfJoin(Map: TList<Integer>; LineIdx: Integer);
+  begin
+    Map.Add(LineBase[LineIdx] + Length(Lines[LineIdx]));
+    Map.Add(LineBase[LineIdx] + Length(Lines[LineIdx]) + 1);
+  end;
+
+  // A block whose Text is a contiguous slice of its single source line (list
+  // items, image alt text): locate the slice past any leading whitespace.
+  procedure MapSingleLine(ABlock: TMarkDownBlock; Map: TList<Integer>);
+  var
+    Line: string;
+    FromCol: Integer;
+  begin
+    Line := Lines[ABlock.SourceStartLine];
+    FromCol := PosEx(ABlock.Text, Line, LeadingWs(Line) + 1);
+    if FromCol > 0 then
+      AddSlice(Map, ABlock.SourceStartLine, FromCol, Length(ABlock.Text));
+  end;
+
+  // A block that keeps its source lines verbatim, joined by sLineBreak (code
+  // blocks and tables). StartOffset skips a leading fence line when present.
+  procedure MapJoinedLines(ABlock: TMarkDownBlock; Map: TList<Integer>;
+    StartOffset: Integer; StopAtFence: Boolean);
+  var
+    LineIdx: Integer;
+    PrevLineIdx: Integer;
+    Text: string;
+    First: Boolean;
+  begin
+    LineIdx := ABlock.SourceStartLine + StartOffset;
+    PrevLineIdx := LineIdx;
+    First := True;
+    Text := '';
+    while LineIdx < Lines.Count do
+    begin
+      if StopAtFence and StartsWithFence(Lines[LineIdx]) then
+        Break;
+      if not First then
+      begin
+        AddCrLfJoin(Map, PrevLineIdx);
+        Text := Text + sLineBreak;
+      end;
+      AddSlice(Map, LineIdx, 1, Length(Lines[LineIdx]));
+      Text := Text + Lines[LineIdx];
+      PrevLineIdx := LineIdx;
+      First := False;
+      Inc(LineIdx);
+      if Text = ABlock.Text then
+        Break;
+    end;
+  end;
+
   // Walk consecutive paragraph lines from StartLine, appending each line's
   // trimmed text joined by a space (or a newline after a hard break), until the
   // reconstruction equals Block.Text. Used for paragraphs and setext headings.
@@ -759,8 +813,14 @@ begin
             MapParagraph(Block, Map);
         bkQuote:
           MapQuote(Block, Map);
+        bkListItem, bkImage:
+          MapSingleLine(Block, Map);
+        bkCodeBlock:
+          MapJoinedLines(Block, Map, 1, True);
+        bkTable:
+          MapJoinedLines(Block, Map, 0, False);
       else
-        Continue; // other kinds keep the heuristic for now
+        Continue; // bkRule has no mappable text
       end;
 
       // Only trust a map that accounts for every character of Text; otherwise
