@@ -25,6 +25,13 @@ type
     FTextRuns: TMarkDownTextRunList;
     FCopyChunks: TMarkDownCopyChunkList;
     FSelectableText: string;
+    // Scratch state shared by the selectable-text builders during a layout
+    // pass (see Paint). FSourceText is the markdown being scanned;
+    // FSourceScanPosition walks it forward; FBlockSourceLimit caps the scan at
+    // the current block so rendered atoms never borrow a later block's source.
+    FSourceText: string;
+    FSourceScanPosition: Integer;
+    FBlockSourceLimit: Integer;
     FScrollPos: Integer;
     FContentHeight: Integer;
     FLastBlockTop: Integer;
@@ -63,6 +70,21 @@ type
     function IsMarkdownStored: Boolean;
     function SelectableToSourcePosition(Position: Integer): Integer;
     function SourceToSelectablePosition(Position: Integer): Integer;
+    // Selectable-text builders, used while Paint walks the block layout.
+    function FindSourceStart(const AText: string): Integer;
+    procedure AddCopyChunk(TextStart, SourceStart: Integer;
+      const AText, AMarkdownText: string);
+    function AddSelectableRun(const ARect: TRect; const AText: string;
+      const AMarkdownText: string = ''): Integer;
+    procedure AddSelectableText(const AText: string;
+      const AMarkdownText: string = ''; AHasSource: Boolean = True);
+    procedure AddSelectableBreak(AHasSource: Boolean = True);
+    procedure DrawCaret;
+    function SelectionRange(out SelStart, SelEnd: Integer): Boolean;
+    procedure DrawSelectionBackground(const AText: string;
+      TextX, TextY, TextHeight, TextStart: Integer);
+    procedure DrawSelectableText(const AText: string;
+      TextX, TextY, TextStart: Integer);
     procedure ClearSelection;
     procedure ClearInlineTokenCaches;
     procedure CopySelectionToClipboard(PlainText: Boolean);
@@ -1485,6 +1507,267 @@ begin
     end;
 end;
 
+// Locate where a rendered atom came from in the source, advancing the scan
+// forward and never crossing into the next block (see FBlockSourceLimit).
+// Returns -1 when the atom has no literal source (decoded entities, link text).
+function TMarkDownViewer.FindSourceStart(const AText: string): Integer;
+var
+  FoundAt: Integer;
+begin
+  Result := -1;
+  if AText = '' then
+    Exit;
+
+  // Rendered whitespace rarely matches the source exactly: paragraph
+  // lines are joined with a space where the source has a line break,
+  // and syntax such as '**' sits between words. Match any whitespace
+  // run instead of searching for the literal text, otherwise the scan
+  // position jumps into a later line and derails every atom after it.
+  if IsWhitespaceText(AText) then
+  begin
+    FoundAt := FSourceScanPosition;
+    while (FoundAt <= Length(FSourceText)) and
+      not CharInSet(FSourceText[FoundAt], [' ', #9, #13, #10]) do
+      Inc(FoundAt);
+    if FoundAt > Length(FSourceText) then
+      Exit;
+    // Don't let the scan find this block's break in the next block's
+    // source - that derails the source<->selectable mapping (#caret jump).
+    if FoundAt >= FBlockSourceLimit then
+      Exit;
+    Result := FoundAt - 1;
+    // An exact match consumes only itself so consecutive line breaks
+    // (blank lines in code blocks) map one atom per break; otherwise
+    // consume the whole run, e.g. a join space standing in for a CRLF.
+    if Copy(FSourceText, FoundAt, Length(AText)) = AText then
+      FSourceScanPosition := FoundAt + Length(AText)
+    else
+    begin
+      while (FoundAt <= Length(FSourceText)) and
+        CharInSet(FSourceText[FoundAt], [' ', #9, #13, #10]) do
+        Inc(FoundAt);
+      FSourceScanPosition := FoundAt;
+    end;
+    Exit;
+  end;
+
+  FoundAt := PosEx(AText, FSourceText, FSourceScanPosition);
+  // A match in a later block's source means the atom is genuinely absent
+  // here (e.g. a decoded entity or link text); treat it as having no
+  // source rather than borrowing the next block's position.
+  if (FoundAt = 0) or (FoundAt >= FBlockSourceLimit) then
+    Exit;
+  Result := FoundAt - 1;
+  FSourceScanPosition := FoundAt + Length(AText);
+end;
+
+procedure TMarkDownViewer.AddCopyChunk(TextStart, SourceStart: Integer;
+  const AText, AMarkdownText: string);
+var
+  Chunk: TMarkDownCopyChunk;
+begin
+  if AText = '' then
+    Exit;
+
+  Chunk.StartIndex := TextStart;
+  Chunk.SourceStartIndex := SourceStart;
+  Chunk.Text := AText;
+  if AMarkdownText <> '' then
+    Chunk.MarkdownText := AMarkdownText
+  else
+    Chunk.MarkdownText := AText;
+  FCopyChunks.Add(Chunk);
+end;
+
+function TMarkDownViewer.AddSelectableRun(const ARect: TRect;
+  const AText: string; const AMarkdownText: string): Integer;
+var
+  Run: TMarkDownTextRun;
+begin
+  Result := Length(FSelectableText);
+  if AText = '' then
+    Exit;
+
+  Run.Rect := ARect;
+  Run.FontName := Canvas.Font.Name;
+  Run.FontSize := Canvas.Font.Size;
+  Run.FontStyle := Canvas.Font.Style;
+  if AMarkdownText <> '' then
+    Run.MarkdownText := AMarkdownText
+  else
+    Run.MarkdownText := AText;
+  Run.StartIndex := Result;
+  Run.SourceStartIndex := FindSourceStart(AText);
+  Run.Text := AText;
+  FTextRuns.Add(Run);
+  FSelectableText := FSelectableText + AText;
+  AddCopyChunk(Result, Run.SourceStartIndex, AText, AMarkdownText);
+end;
+
+procedure TMarkDownViewer.AddSelectableText(const AText: string;
+  const AMarkdownText: string; AHasSource: Boolean);
+var
+  SourceStart: Integer;
+  TextStart: Integer;
+begin
+  if AText = '' then
+    Exit;
+
+  TextStart := Length(FSelectableText);
+  FSelectableText := FSelectableText + AText;
+  if AHasSource then
+    SourceStart := FindSourceStart(AText)
+  else
+    SourceStart := -1;
+  AddCopyChunk(TextStart, SourceStart, AText, AMarkdownText);
+end;
+
+// AHasSource=False marks breaks that exist only in the rendered layout
+// (word wrap, table cell separators); they must not consume source text
+// or the caret-to-source mapping derails for everything that follows.
+procedure TMarkDownViewer.AddSelectableBreak(AHasSource: Boolean);
+begin
+  if FSelectableText = '' then
+    Exit;
+  if not EndsText(sLineBreak, FSelectableText) then
+    AddSelectableText(sLineBreak, '', AHasSource);
+end;
+
+procedure TMarkDownViewer.DrawCaret;
+var
+  CaretPosition: Integer;
+  I: Integer;
+  Run: TMarkDownTextRun;
+  X: Integer;
+begin
+  if FReadOnly or not Focused or HasSelection or
+    (FTextRuns.Count = 0) then
+    Exit;
+
+  CaretPosition := EnsureRange(FSelectionCaret, 0,
+    Length(FSelectableText));
+  Run := FTextRuns.Last;
+  for I := 0 to FTextRuns.Count - 1 do
+  begin
+    Run := FTextRuns[I];
+    if CaretPosition <= Run.StartIndex + Length(Run.Text) then
+      Break;
+  end;
+
+  Canvas.Font.Assign(Font);
+  Canvas.Font.Name := Run.FontName;
+  Canvas.Font.Size := Run.FontSize;
+  Canvas.Font.Style := Run.FontStyle;
+  X := Run.Rect.Left + Canvas.TextWidth(Copy(Run.Text, 1,
+    EnsureRange(CaretPosition - Run.StartIndex, 0, Length(Run.Text))));
+  Canvas.Pen.Color := GetEffectiveTextColor;
+  Canvas.MoveTo(X, Run.Rect.Top + 1);
+  Canvas.LineTo(X, Run.Rect.Bottom - 1);
+end;
+
+// The current selection as a [SelStart, SelEnd) range over the selectable
+// text; False (with zeroed bounds) when there is no selection.
+function TMarkDownViewer.SelectionRange(out SelStart, SelEnd: Integer): Boolean;
+begin
+  Result := HasSelection;
+  if Result then
+  begin
+    SelStart := Min(FSelectionAnchor, FSelectionCaret);
+    SelEnd := Max(FSelectionAnchor, FSelectionCaret);
+  end
+  else
+  begin
+    SelStart := 0;
+    SelEnd := 0;
+  end;
+end;
+
+// Paint the selection highlight behind whatever part of AText (a run starting
+// at selectable index TextStart) falls inside the selection.
+procedure TMarkDownViewer.DrawSelectionBackground(const AText: string;
+  TextX, TextY, TextHeight, TextStart: Integer);
+var
+  SelStart: Integer;
+  SelEnd: Integer;
+  LocalStart: Integer;
+  LocalEnd: Integer;
+  HighlightRect: TRect;
+  OldColor: TColor;
+  OldStyle: TBrushStyle;
+begin
+  if not SelectionRange(SelStart, SelEnd) then
+    Exit;
+
+  LocalStart := Max(0, SelStart - TextStart);
+  LocalEnd := Min(Length(AText), SelEnd - TextStart);
+  if LocalStart >= LocalEnd then
+    Exit;
+
+  HighlightRect := Rect(
+    TextX + Canvas.TextWidth(Copy(AText, 1, LocalStart)),
+    TextY,
+    TextX + Canvas.TextWidth(Copy(AText, 1, LocalEnd)),
+    TextY + TextHeight);
+
+  OldColor := Canvas.Brush.Color;
+  OldStyle := Canvas.Brush.Style;
+  Canvas.Brush.Color := GetEffectiveSelectionBackground;
+  Canvas.Brush.Style := bsSolid;
+  Canvas.FillRect(HighlightRect);
+  Canvas.Brush.Color := OldColor;
+  Canvas.Brush.Style := OldStyle;
+end;
+
+// Draw AText, switching to the selection text colour for the portion that
+// falls inside the selection (TextStart is the run's selectable index).
+procedure TMarkDownViewer.DrawSelectableText(const AText: string;
+  TextX, TextY, TextStart: Integer);
+var
+  SelStart: Integer;
+  SelEnd: Integer;
+  LocalStart: Integer;
+  LocalEnd: Integer;
+  XPos: Integer;
+  PrefixText: string;
+  SelectedText: string;
+  SuffixText: string;
+  OldFontColor: TColor;
+begin
+  if not SelectionRange(SelStart, SelEnd) then
+  begin
+    Canvas.TextOut(TextX, TextY, AText);
+    Exit;
+  end;
+
+  LocalStart := Max(0, SelStart - TextStart);
+  LocalEnd := Min(Length(AText), SelEnd - TextStart);
+  if LocalStart >= LocalEnd then
+  begin
+    Canvas.TextOut(TextX, TextY, AText);
+    Exit;
+  end;
+
+  PrefixText := Copy(AText, 1, LocalStart);
+  SelectedText := Copy(AText, LocalStart + 1, LocalEnd - LocalStart);
+  SuffixText := Copy(AText, LocalEnd + 1, MaxInt);
+
+  XPos := TextX;
+  if PrefixText <> '' then
+  begin
+    Canvas.TextOut(XPos, TextY, PrefixText);
+    Inc(XPos, Canvas.TextWidth(PrefixText));
+  end;
+
+  OldFontColor := Canvas.Font.Color;
+  Canvas.Font.Color := GetEffectiveSelectionTextColor;
+  Canvas.TextOut(XPos, TextY, SelectedText);
+  Canvas.Font.Color := OldFontColor;
+  Inc(XPos, Canvas.TextWidth(SelectedText));
+
+  if SuffixText <> '' then
+    Canvas.TextOut(XPos, TextY, SuffixText);
+end;
+
 procedure TMarkDownViewer.Paint;
 var
   Blocks: TMarkDownBlockList;
@@ -1510,265 +1793,12 @@ var
   TextIndent: Integer;
   LineTextStart: Integer;
   OldBkMode: Integer;
-  SourceScanPosition: Integer;
-  BlockSourceLimit: Integer;
-  SourceText: string;
 
   function InlineTokensForBlock(ABlock: TMarkDownBlock): TMarkDownInlineList;
   begin
     if ABlock.InlineTokens = nil then
       ABlock.InlineTokens := TMarkDownBlockParser.ParseInline(ABlock.Text, FLinkReferences);
     Result := ABlock.InlineTokens;
-  end;
-
-  function SelectionRange(out SelStart, SelEnd: Integer): Boolean;
-  begin
-    Result := HasSelection;
-    if Result then
-    begin
-      SelStart := Min(FSelectionAnchor, FSelectionCaret);
-      SelEnd := Max(FSelectionAnchor, FSelectionCaret);
-    end
-    else
-    begin
-      SelStart := 0;
-      SelEnd := 0;
-    end;
-  end;
-
-  function FindSourceStart(const AText: string): Integer;
-  var
-    FoundAt: Integer;
-  begin
-    Result := -1;
-    if AText = '' then
-      Exit;
-
-    // Rendered whitespace rarely matches the source exactly: paragraph
-    // lines are joined with a space where the source has a line break,
-    // and syntax such as '**' sits between words. Match any whitespace
-    // run instead of searching for the literal text, otherwise the scan
-    // position jumps into a later line and derails every atom after it.
-    if IsWhitespaceText(AText) then
-    begin
-      FoundAt := SourceScanPosition;
-      while (FoundAt <= Length(SourceText)) and
-        not CharInSet(SourceText[FoundAt], [' ', #9, #13, #10]) do
-        Inc(FoundAt);
-      if FoundAt > Length(SourceText) then
-        Exit;
-      // Don't let the scan find this block's break in the next block's
-      // source - that derails the source<->selectable mapping (#caret jump).
-      if FoundAt >= BlockSourceLimit then
-        Exit;
-      Result := FoundAt - 1;
-      // An exact match consumes only itself so consecutive line breaks
-      // (blank lines in code blocks) map one atom per break; otherwise
-      // consume the whole run, e.g. a join space standing in for a CRLF.
-      if Copy(SourceText, FoundAt, Length(AText)) = AText then
-        SourceScanPosition := FoundAt + Length(AText)
-      else
-      begin
-        while (FoundAt <= Length(SourceText)) and
-          CharInSet(SourceText[FoundAt], [' ', #9, #13, #10]) do
-          Inc(FoundAt);
-        SourceScanPosition := FoundAt;
-      end;
-      Exit;
-    end;
-
-    FoundAt := PosEx(AText, SourceText, SourceScanPosition);
-    // A match in a later block's source means the atom is genuinely absent
-    // here (e.g. a decoded entity or link text); treat it as having no
-    // source rather than borrowing the next block's position.
-    if (FoundAt = 0) or (FoundAt >= BlockSourceLimit) then
-      Exit;
-    Result := FoundAt - 1;
-    SourceScanPosition := FoundAt + Length(AText);
-  end;
-
-  procedure AddCopyChunk(TextStart, SourceStart: Integer;
-    const AText, AMarkdownText: string);
-  var
-    Chunk: TMarkDownCopyChunk;
-  begin
-    if AText = '' then
-      Exit;
-
-    Chunk.StartIndex := TextStart;
-    Chunk.SourceStartIndex := SourceStart;
-    Chunk.Text := AText;
-    if AMarkdownText <> '' then
-      Chunk.MarkdownText := AMarkdownText
-    else
-      Chunk.MarkdownText := AText;
-    FCopyChunks.Add(Chunk);
-  end;
-
-  function AddSelectableRun(const ARect: TRect; const AText: string;
-    const AMarkdownText: string = ''): Integer;
-  var
-    Run: TMarkDownTextRun;
-  begin
-    Result := Length(FSelectableText);
-    if AText = '' then
-      Exit;
-
-    Run.Rect := ARect;
-    Run.FontName := Canvas.Font.Name;
-    Run.FontSize := Canvas.Font.Size;
-    Run.FontStyle := Canvas.Font.Style;
-    if AMarkdownText <> '' then
-      Run.MarkdownText := AMarkdownText
-    else
-      Run.MarkdownText := AText;
-    Run.StartIndex := Result;
-    Run.SourceStartIndex := FindSourceStart(AText);
-    Run.Text := AText;
-    FTextRuns.Add(Run);
-    FSelectableText := FSelectableText + AText;
-    AddCopyChunk(Result, Run.SourceStartIndex, AText, AMarkdownText);
-  end;
-
-  procedure AddSelectableText(const AText: string; const AMarkdownText: string = '';
-    AHasSource: Boolean = True);
-  var
-    SourceStart: Integer;
-    TextStart: Integer;
-  begin
-    if AText = '' then
-      Exit;
-
-    TextStart := Length(FSelectableText);
-    FSelectableText := FSelectableText + AText;
-    if AHasSource then
-      SourceStart := FindSourceStart(AText)
-    else
-      SourceStart := -1;
-    AddCopyChunk(TextStart, SourceStart, AText, AMarkdownText);
-  end;
-
-  // AHasSource=False marks breaks that exist only in the rendered layout
-  // (word wrap, table cell separators); they must not consume source text
-  // or the caret-to-source mapping derails for everything that follows.
-  procedure AddSelectableBreak(AHasSource: Boolean = True);
-  begin
-    if FSelectableText = '' then
-      Exit;
-    if not EndsText(sLineBreak, FSelectableText) then
-      AddSelectableText(sLineBreak, '', AHasSource);
-  end;
-
-  procedure DrawCaret;
-  var
-    CaretPosition: Integer;
-    I: Integer;
-    Run: TMarkDownTextRun;
-    X: Integer;
-  begin
-    if FReadOnly or not Focused or HasSelection or
-      (FTextRuns.Count = 0) then
-      Exit;
-
-    CaretPosition := EnsureRange(FSelectionCaret, 0,
-      Length(FSelectableText));
-    Run := FTextRuns.Last;
-    for I := 0 to FTextRuns.Count - 1 do
-    begin
-      Run := FTextRuns[I];
-      if CaretPosition <= Run.StartIndex + Length(Run.Text) then
-        Break;
-    end;
-
-    Canvas.Font.Assign(Font);
-    Canvas.Font.Name := Run.FontName;
-    Canvas.Font.Size := Run.FontSize;
-    Canvas.Font.Style := Run.FontStyle;
-    X := Run.Rect.Left + Canvas.TextWidth(Copy(Run.Text, 1,
-      EnsureRange(CaretPosition - Run.StartIndex, 0, Length(Run.Text))));
-    Canvas.Pen.Color := GetEffectiveTextColor;
-    Canvas.MoveTo(X, Run.Rect.Top + 1);
-    Canvas.LineTo(X, Run.Rect.Bottom - 1);
-  end;
-
-  procedure DrawSelectionBackground(const AText: string; TextX, TextY, TextHeight, TextStart: Integer);
-  var
-    SelStart: Integer;
-    SelEnd: Integer;
-    LocalStart: Integer;
-    LocalEnd: Integer;
-    HighlightRect: TRect;
-    OldColor: TColor;
-    OldStyle: TBrushStyle;
-  begin
-    if not SelectionRange(SelStart, SelEnd) then
-      Exit;
-
-    LocalStart := Max(0, SelStart - TextStart);
-    LocalEnd := Min(Length(AText), SelEnd - TextStart);
-    if LocalStart >= LocalEnd then
-      Exit;
-
-    HighlightRect := Rect(
-      TextX + Canvas.TextWidth(Copy(AText, 1, LocalStart)),
-      TextY,
-      TextX + Canvas.TextWidth(Copy(AText, 1, LocalEnd)),
-      TextY + TextHeight);
-
-    OldColor := Canvas.Brush.Color;
-    OldStyle := Canvas.Brush.Style;
-    Canvas.Brush.Color := GetEffectiveSelectionBackground;
-    Canvas.Brush.Style := bsSolid;
-    Canvas.FillRect(HighlightRect);
-    Canvas.Brush.Color := OldColor;
-    Canvas.Brush.Style := OldStyle;
-  end;
-
-  procedure DrawSelectableText(const AText: string; TextX, TextY, TextStart: Integer);
-  var
-    SelStart: Integer;
-    SelEnd: Integer;
-    LocalStart: Integer;
-    LocalEnd: Integer;
-    XPos: Integer;
-    PrefixText: string;
-    SelectedText: string;
-    SuffixText: string;
-    OldFontColor: TColor;
-  begin
-    if not SelectionRange(SelStart, SelEnd) then
-    begin
-      Canvas.TextOut(TextX, TextY, AText);
-      Exit;
-    end;
-
-    LocalStart := Max(0, SelStart - TextStart);
-    LocalEnd := Min(Length(AText), SelEnd - TextStart);
-    if LocalStart >= LocalEnd then
-    begin
-      Canvas.TextOut(TextX, TextY, AText);
-      Exit;
-    end;
-
-    PrefixText := Copy(AText, 1, LocalStart);
-    SelectedText := Copy(AText, LocalStart + 1, LocalEnd - LocalStart);
-    SuffixText := Copy(AText, LocalEnd + 1, MaxInt);
-
-    XPos := TextX;
-    if PrefixText <> '' then
-    begin
-      Canvas.TextOut(XPos, TextY, PrefixText);
-      Inc(XPos, Canvas.TextWidth(PrefixText));
-    end;
-
-    OldFontColor := Canvas.Font.Color;
-    Canvas.Font.Color := GetEffectiveSelectionTextColor;
-    Canvas.TextOut(XPos, TextY, SelectedText);
-    Canvas.Font.Color := OldFontColor;
-    Inc(XPos, Canvas.TextWidth(SelectedText));
-
-    if SuffixText <> '' then
-      Canvas.TextOut(XPos, TextY, SuffixText);
   end;
 
   procedure AssignBaseFont(Style: TFontStyles; SizeDelta: Integer; const FontName: string = '');
@@ -2212,8 +2242,8 @@ begin
   FTextRuns.Clear;
   FCopyChunks.Clear;
   FSelectableText := '';
-  SourceText := FMarkdown.Text;
-  SourceScanPosition := 1;
+  FSourceText := FMarkdown.Text;
+  FSourceScanPosition := 1;
 
   Blocks := FBlocks;
   Y := MarkdownPadding - FScrollPos;
@@ -2234,12 +2264,12 @@ begin
     // bounding it per block keeps chunk source offsets monotonic so the
     // caret round-trip in ChangeHeadingLevel lands on the right line.
     if (Block.SourceStartLine >= 0) and (Block.SourceStartLine < FMarkdown.Count) then
-      SourceScanPosition := LineStartSourcePos(Block.SourceStartLine) + 1;
+      FSourceScanPosition := LineStartSourcePos(Block.SourceStartLine) + 1;
     if (I + 1 < Blocks.Count) and (Blocks[I + 1].SourceStartLine >= 0) and
        (Blocks[I + 1].SourceStartLine < FMarkdown.Count) then
-      BlockSourceLimit := LineStartSourcePos(Blocks[I + 1].SourceStartLine) + 1
+      FBlockSourceLimit := LineStartSourcePos(Blocks[I + 1].SourceStartLine) + 1
     else
-      BlockSourceLimit := Length(SourceText) + 1;
+      FBlockSourceLimit := Length(FSourceText) + 1;
     case Block.Kind of
       bkHeading:
         begin
