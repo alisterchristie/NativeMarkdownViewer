@@ -544,6 +544,11 @@ begin
         ToggleInlineFormat('*')
       else
         Result := False;
+    Ord('E'):
+      if not FReadOnly then
+        ToggleInlineFormat('`')
+      else
+        Result := False;
     Ord('C'):
       CopySelectionToClipboard(ssShift in Shift);
     Ord('V'):

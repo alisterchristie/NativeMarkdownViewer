@@ -159,6 +159,10 @@ type
     procedure CtrlBTogglesBoldOff;
     [Test]
     procedure CtrlIWrapsSelectionInItalic;
+    [Test]
+    procedure CtrlEWrapsSelectionInCode;
+    [Test]
+    procedure CtrlBBoldsPartialSelection;
   end;
 
 implementation
@@ -1262,6 +1266,36 @@ begin
   FViewer.PressKey(Ord('I'), [ssCtrl]);
 
   Assert.AreEqual('*hello*', Trim(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.CtrlEWrapsSelectionInCode;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'run it';
+  RepaintViewer;
+
+  FViewer.PressKey(Ord('A'), [ssCtrl]);
+  FViewer.PressKey(Ord('E'), [ssCtrl]);
+
+  Assert.AreEqual('`run it`', Trim(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.CtrlBBoldsPartialSelection;
+var
+  I: Integer;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'alpha bravo charlie';
+  RepaintViewer;
+
+  // Place the caret before "bravo" (offset 6) and select the five letters.
+  for I := 1 to 6 do
+    FViewer.PressKey(VK_RIGHT);
+  for I := 1 to 5 do
+    FViewer.PressKey(VK_RIGHT, [ssShift]);
+  FViewer.PressKey(Ord('B'), [ssCtrl]);
+
+  Assert.AreEqual('alpha **bravo** charlie', Trim(FViewer.MarkdownText));
 end;
 
 initialization
