@@ -94,6 +94,10 @@ type
     function GetBlockAtLine(LineIdx: Integer): TMarkDownBlock;
     function LineStartSourcePos(LineIdx: Integer): Integer;
     function GetHeadingPrefixLength(const Line: string): Integer;
+    procedure PushUndoState;
+    procedure ApplyMarkdownLine(ALineIndex: Integer; const ANewLine: string);
+    procedure ApplyMarkdownText(const ANewText: string);
+    procedure FinishEditAtSource(ASourcePos: Integer);
     function GetEffectiveBackground: TColor;
     function GetEffectiveTextColor: TColor;
     function GetEffectiveSelectionBackground: TColor;
@@ -897,7 +901,6 @@ end;
 procedure TMarkDownViewer.InsertTextAtSelection(const Value: string);
 var
   NewSourceCaret: Integer;
-  SavedScrollPos: Integer;
   SelEnd: Integer;
   SelStart: Integer;
   SourceEnd: Integer;
@@ -921,30 +924,14 @@ begin
     SourceEnd := Temp;
   end;
 
+  PushUndoState;
   SourceText := FMarkdown.Text;
-  FUndoStack.Add(SourceText);
-  while FUndoStack.Count > MaxUndoDepth do
-    FUndoStack.Delete(0);
-  FRedoStack.Clear;
   Delete(SourceText, SourceStart + 1, SourceEnd - SourceStart);
   Insert(Value, SourceText, SourceStart + 1);
   NewSourceCaret := SourceStart + Length(Value);
 
-  SavedScrollPos := FScrollPos;
-  FApplyingEdit := True;
-  try
-    FMarkdown.Text := SourceText;
-  finally
-    FApplyingEdit := False;
-  end;
-  FScrollPos := SavedScrollPos;
-  UpdateScrollBar;
-  Repaint;
-  FSelectionCaret := SourceToSelectablePosition(NewSourceCaret);
-  FSelectionAnchor := FSelectionCaret;
-  FDesiredCaretX := -1;
-  ScrollCaretIntoView;
-  Invalidate;
+  ApplyMarkdownText(SourceText);
+  FinishEditAtSource(NewSourceCaret);
 end;
 
 procedure TMarkDownViewer.MoveCaret(Delta: Integer; ExtendSelection: Boolean);
@@ -2464,6 +2451,63 @@ begin
     Result := Result + Length(Line) - Length(T) + 1; // +1 for the space after #
 end;
 
+// Snapshot the current document onto the undo stack, cap its depth and drop
+// the redo history. Call once immediately before mutating FMarkdown.
+procedure TMarkDownViewer.PushUndoState;
+begin
+  FUndoStack.Add(FMarkdown.Text);
+  while FUndoStack.Count > MaxUndoDepth do
+    FUndoStack.Delete(0);
+  FRedoStack.Clear;
+end;
+
+// Replace a single source line while preserving the scroll position. The
+// FApplyingEdit guard stops MarkdownChanged from clearing undo/redo and
+// resetting the view as if the text had been assigned from outside.
+procedure TMarkDownViewer.ApplyMarkdownLine(ALineIndex: Integer;
+  const ANewLine: string);
+var
+  SavedScrollPos: Integer;
+begin
+  SavedScrollPos := FScrollPos;
+  FApplyingEdit := True;
+  try
+    FMarkdown[ALineIndex] := ANewLine;
+  finally
+    FApplyingEdit := False;
+  end;
+  FScrollPos := SavedScrollPos;
+  UpdateScrollBar;
+end;
+
+// Replace the whole document while preserving the scroll position.
+procedure TMarkDownViewer.ApplyMarkdownText(const ANewText: string);
+var
+  SavedScrollPos: Integer;
+begin
+  SavedScrollPos := FScrollPos;
+  FApplyingEdit := True;
+  try
+    FMarkdown.Text := ANewText;
+  finally
+    FApplyingEdit := False;
+  end;
+  FScrollPos := SavedScrollPos;
+  UpdateScrollBar;
+end;
+
+// Repaint to rebuild the layout, then collapse the selection onto the caret
+// mapped from a source position and bring it into view.
+procedure TMarkDownViewer.FinishEditAtSource(ASourcePos: Integer);
+begin
+  Repaint;
+  FSelectionCaret := SourceToSelectablePosition(ASourcePos);
+  FSelectionAnchor := FSelectionCaret;
+  FDesiredCaretX := -1;
+  ScrollCaretIntoView;
+  Invalidate;
+end;
+
 procedure TMarkDownViewer.ChangeHeadingLevel(Delta: Integer);
 var
   Block: TMarkDownBlock;
@@ -2481,7 +2525,6 @@ var
   NewLevel: Integer;
   UnderlineIdx: Integer;
   UnderlineLen: Integer;
-  SavedScrollPos: Integer;
 begin
   if FReadOnly then Exit;
   if FSelectableText = '' then Exit;
@@ -2500,29 +2543,11 @@ begin
     NewLine := '# ' + OldLine;
     if NewLine = OldLine then Exit;
 
-    FUndoStack.Add(FMarkdown.Text);
-    while FUndoStack.Count > MaxUndoDepth do
-      FUndoStack.Delete(0);
-    FRedoStack.Clear;
-
-    SavedScrollPos := FScrollPos;
-    FApplyingEdit := True;
-    try
-      FMarkdown[LineIdx] := NewLine;
-    finally
-      FApplyingEdit := False;
-    end;
-    FScrollPos := SavedScrollPos;
-    UpdateScrollBar;
-
+    PushUndoState;
+    ApplyMarkdownLine(LineIdx, NewLine);
     NewSourcePos := Min(OldSourcePos + 2,
       LineStartSourcePos(LineIdx) + Length(NewLine));
-    Repaint;
-    FSelectionCaret := SourceToSelectablePosition(NewSourcePos);
-    FSelectionAnchor := FSelectionCaret;
-    FDesiredCaretX := -1;
-    ScrollCaretIntoView;
-    Invalidate;
+    FinishEditAtSource(NewSourcePos);
     Exit;
   end;
 
@@ -2550,25 +2575,9 @@ begin
       if Block.Level = 1 then
       begin
         // Strip underline: the text line becomes a plain paragraph
-        FUndoStack.Add(FMarkdown.Text);
-        while FUndoStack.Count > MaxUndoDepth do
-          FUndoStack.Delete(0);
-        FRedoStack.Clear;
-        SavedScrollPos := FScrollPos;
-        FApplyingEdit := True;
-        try
-          FMarkdown[UnderlineIdx] := '';
-        finally
-          FApplyingEdit := False;
-        end;
-        FScrollPos := SavedScrollPos;
-        UpdateScrollBar;
-        Repaint;
-        FSelectionCaret := SourceToSelectablePosition(OldSourcePos);
-        FSelectionAnchor := FSelectionCaret;
-        FDesiredCaretX := -1;
-        ScrollCaretIntoView;
-        Invalidate;
+        PushUndoState;
+        ApplyMarkdownLine(UnderlineIdx, '');
+        FinishEditAtSource(OldSourcePos);
         Exit;
       end;
       // H2 → H1: change underline from - to =
@@ -2576,28 +2585,10 @@ begin
       NewLine := StringOfChar('=', UnderlineLen);
     end;
 
-    FUndoStack.Add(FMarkdown.Text);
-    while FUndoStack.Count > MaxUndoDepth do
-      FUndoStack.Delete(0);
-    FRedoStack.Clear;
-
-    SavedScrollPos := FScrollPos;
-    FApplyingEdit := True;
-    try
-      FMarkdown[UnderlineIdx] := NewLine;
-    finally
-      FApplyingEdit := False;
-    end;
-    FScrollPos := SavedScrollPos;
-    UpdateScrollBar;
-
+    PushUndoState;
+    ApplyMarkdownLine(UnderlineIdx, NewLine);
     // Setext underline change doesn't affect caret position mapping
-    Repaint;
-    FSelectionCaret := SourceToSelectablePosition(OldSourcePos);
-    FSelectionAnchor := FSelectionCaret;
-    FDesiredCaretX := -1;
-    ScrollCaretIntoView;
-    Invalidate;
+    FinishEditAtSource(OldSourcePos);
     Exit;
   end;
 
@@ -2615,19 +2606,8 @@ begin
     LineStart := Length(OldLine) - Length(T);
     NewLine := Copy(OldLine, 1, LineStart) + Copy(T, OldLevel + 2, MaxInt);
 
-    FUndoStack.Add(FMarkdown.Text);
-    while FUndoStack.Count > MaxUndoDepth do
-      FUndoStack.Delete(0);
-    FRedoStack.Clear;
-    SavedScrollPos := FScrollPos;
-    FApplyingEdit := True;
-    try
-      FMarkdown[Block.SourceStartLine] := NewLine;
-    finally
-      FApplyingEdit := False;
-    end;
-    FScrollPos := SavedScrollPos;
-    UpdateScrollBar;
+    PushUndoState;
+    ApplyMarkdownLine(Block.SourceStartLine, NewLine);
 
     // Caret shifts back by the prefix length (including the space after #)
     NewSourcePos := OldSourcePos - OldPrefixLen;
@@ -2635,12 +2615,7 @@ begin
       NewSourcePos := 0;
     NewSourcePos := Min(NewSourcePos,
       LineStartSourcePos(Block.SourceStartLine) + Length(NewLine));
-    Repaint;
-    FSelectionCaret := SourceToSelectablePosition(NewSourcePos);
-    FSelectionAnchor := FSelectionCaret;
-    FDesiredCaretX := -1;
-    ScrollCaretIntoView;
-    Invalidate;
+    FinishEditAtSource(NewSourcePos);
     Exit;
   end;
 
@@ -2658,20 +2633,8 @@ begin
   NewPrefixLen := GetHeadingPrefixLength(NewLine);
   PrefixDelta := NewPrefixLen - OldPrefixLen;
 
-  FUndoStack.Add(FMarkdown.Text);
-  while FUndoStack.Count > MaxUndoDepth do
-    FUndoStack.Delete(0);
-  FRedoStack.Clear;
-
-  SavedScrollPos := FScrollPos;
-  FApplyingEdit := True;
-  try
-    FMarkdown[Block.SourceStartLine] := NewLine;
-  finally
-    FApplyingEdit := False;
-  end;
-  FScrollPos := SavedScrollPos;
-  UpdateScrollBar;
+  PushUndoState;
+  ApplyMarkdownLine(Block.SourceStartLine, NewLine);
 
   // Adjust caret: if it was past the prefix, shift by prefix delta
   if OldSourcePos >= LineStartSourcePos(Block.SourceStartLine) + OldPrefixLen then
@@ -2680,13 +2643,7 @@ begin
     NewSourcePos := OldSourcePos;
   NewSourcePos := Min(NewSourcePos,
     LineStartSourcePos(Block.SourceStartLine) + Length(NewLine));
-
-  Repaint;
-  FSelectionCaret := SourceToSelectablePosition(NewSourcePos);
-  FSelectionAnchor := FSelectionCaret;
-  FDesiredCaretX := -1;
-  ScrollCaretIntoView;
-  Invalidate;
+  FinishEditAtSource(NewSourcePos);
 end;
 
 procedure TMarkDownViewer.ToggleTaskAtLine(SourceLine: Integer);
@@ -2699,17 +2656,8 @@ begin
   if NewLine = FMarkdown[SourceLine] then
     Exit;
 
-  FUndoStack.Add(FMarkdown.Text);
-  while FUndoStack.Count > MaxUndoDepth do
-    FUndoStack.Delete(0);
-  FRedoStack.Clear;
-
-  FApplyingEdit := True;
-  try
-    FMarkdown[SourceLine] := NewLine;
-  finally
-    FApplyingEdit := False;
-  end;
+  PushUndoState;
+  ApplyMarkdownLine(SourceLine, NewLine);
 end;
 
 function TMarkDownViewer.SearchMatchCount: Integer;
@@ -2952,21 +2900,14 @@ end;
 
 procedure TMarkDownViewer.Undo;
 var
-  SavedScrollPos: Integer;
+  NewText: string;
 begin
   if FReadOnly or (FUndoStack.Count = 0) then
     Exit;
   FRedoStack.Add(FMarkdown.Text);
-  SavedScrollPos := FScrollPos;
-  FApplyingEdit := True;
-  try
-    FMarkdown.Text := FUndoStack[FUndoStack.Count - 1];
-  finally
-    FApplyingEdit := False;
-  end;
+  NewText := FUndoStack[FUndoStack.Count - 1];
   FUndoStack.Delete(FUndoStack.Count - 1);
-  FScrollPos := SavedScrollPos;
-  UpdateScrollBar;
+  ApplyMarkdownText(NewText);
   Repaint;
   FSelectionAnchor := 0;
   FSelectionCaret := 0;
@@ -2975,21 +2916,14 @@ end;
 
 procedure TMarkDownViewer.Redo;
 var
-  SavedScrollPos: Integer;
+  NewText: string;
 begin
   if FReadOnly or (FRedoStack.Count = 0) then
     Exit;
   FUndoStack.Add(FMarkdown.Text);
-  SavedScrollPos := FScrollPos;
-  FApplyingEdit := True;
-  try
-    FMarkdown.Text := FRedoStack[FRedoStack.Count - 1];
-  finally
-    FApplyingEdit := False;
-  end;
+  NewText := FRedoStack[FRedoStack.Count - 1];
   FRedoStack.Delete(FRedoStack.Count - 1);
-  FScrollPos := SavedScrollPos;
-  UpdateScrollBar;
+  ApplyMarkdownText(NewText);
   Repaint;
   FSelectionAnchor := 0;
   FSelectionCaret := 0;
