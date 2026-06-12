@@ -129,6 +129,24 @@ type
     procedure DirectEditingBackspaceJoinsBlocks;
     [Test]
     procedure DirectEditingArrowSkipsLineBreakPair;
+    [Test]
+    procedure TabConvertsParagraphToHeading;
+    [Test]
+    procedure TabIncreasesHeadingLevel;
+    [Test]
+    procedure ShiftTabDecreasesHeadingLevel;
+    [Test]
+    procedure ShiftTabOnH1StripsToParagraph;
+    [Test]
+    procedure TabDemotesSetextHeading;
+    [Test]
+    procedure TabOnHeadingPreservesCaretColumn;
+    [Test]
+    procedure ReadOnlyArrowKeysScroll;
+    [Test]
+    procedure RendersQuoteBlockWithDefaultColors;
+    [Test]
+    procedure SearchTextHighlightsMatchesOnPaint;
   end;
 
 implementation
@@ -1030,6 +1048,129 @@ begin
 
   Assert.IsTrue(FViewer.MarkdownText.Contains('# Xbravo'),
     FViewer.MarkdownText);
+end;
+
+procedure TMarkDownViewerTests.TabConvertsParagraphToHeading;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'Hello';
+  RepaintViewer;
+
+  FViewer.PressKey(VK_TAB);
+
+  Assert.AreEqual('# Hello', Trim(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.TabIncreasesHeadingLevel;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := '# Hello';
+  RepaintViewer;
+
+  FViewer.PressKey(VK_TAB);
+
+  Assert.AreEqual('## Hello', Trim(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.ShiftTabDecreasesHeadingLevel;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := '## Hello';
+  RepaintViewer;
+
+  FViewer.PressKey(VK_TAB, [ssShift]);
+
+  Assert.AreEqual('# Hello', Trim(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.ShiftTabOnH1StripsToParagraph;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := '# Hello';
+  RepaintViewer;
+
+  FViewer.PressKey(VK_TAB, [ssShift]);
+
+  Assert.AreEqual('Hello', Trim(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.TabDemotesSetextHeading;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'Title' + sLineBreak + '===';
+  RepaintViewer;
+
+  FViewer.PressKey(VK_TAB);
+
+  Assert.IsTrue(FViewer.MarkdownText.Contains('Title'), FViewer.MarkdownText);
+  Assert.IsTrue(FViewer.MarkdownText.Contains('---'), FViewer.MarkdownText);
+  Assert.IsFalse(FViewer.MarkdownText.Contains('==='), FViewer.MarkdownText);
+end;
+
+procedure TMarkDownViewerTests.TabOnHeadingPreservesCaretColumn;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := '# Hello';
+  RepaintViewer;
+
+  // Caret at end of the rendered "Hello"; after the level change it should keep
+  // its place in the text (shifted past the extra '#'), not jump.
+  FViewer.PressKey(VK_END);
+  FViewer.PressKey(VK_TAB);
+  FViewer.TypeCharacter('X');
+
+  Assert.AreEqual('## HelloX', Trim(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.ReadOnlyArrowKeysScroll;
+var
+  I: Integer;
+  Source: TStringList;
+begin
+  ShowViewer(300, 80);
+  FViewer.ReadOnly := True;
+  Source := TStringList.Create;
+  try
+    for I := 1 to 60 do
+      Source.Add('Line ' + I.ToString);
+    FViewer.Markdown.Assign(Source);
+  finally
+    Source.Free;
+  end;
+  RepaintViewer;
+
+  Assert.AreEqual(0, FViewer.ScrollPosition);
+  FViewer.PressKey(VK_NEXT);
+  Assert.IsTrue(FViewer.ScrollPosition > 0, 'page down should scroll');
+  FViewer.PressKey(VK_PRIOR);
+  Assert.AreEqual(0, FViewer.ScrollPosition);
+  FViewer.PressKey(VK_END);
+  Assert.IsTrue(FViewer.ScrollPosition > 0, 'end should scroll to bottom');
+  FViewer.PressKey(VK_HOME);
+  Assert.AreEqual(0, FViewer.ScrollPosition);
+end;
+
+procedure TMarkDownViewerTests.RendersQuoteBlockWithDefaultColors;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := '> quoted text';
+  RepaintViewer;
+
+  // Rendering the quote exercises the quote-bar colour path; the rendered text
+  // round-trips through selection.
+  FViewer.SelectAll;
+  Assert.IsTrue(FViewer.SelectedText.Contains('quoted text'),
+    FViewer.SelectedText);
+end;
+
+procedure TMarkDownViewerTests.SearchTextHighlightsMatchesOnPaint;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'find the word find here';
+  FViewer.SearchText := 'find';
+  RepaintViewer;
+
+  Assert.AreEqual(2, FViewer.SearchMatchCount);
 end;
 
 initialization
