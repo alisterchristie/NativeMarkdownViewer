@@ -406,7 +406,12 @@ end;
 
 function TMarkDownViewer.GetEffectiveBackground: TColor;
 begin
-  Result := ThemedColor(clWindow, Color);
+  // An explicitly chosen Color wins, even under a VCL style; the default
+  // (clWindow) follows the active style so the control blends into the theme.
+  if Color <> clWindow then
+    Result := Color
+  else
+    Result := ThemedColor(clWindow, Color);
 end;
 
 function TMarkDownViewer.GetEffectiveTextColor: TColor;
