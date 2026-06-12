@@ -70,14 +70,22 @@ type
     function IsMarkdownStored: Boolean;
     function SelectableToSourcePosition(Position: Integer): Integer;
     function SourceToSelectablePosition(Position: Integer): Integer;
+    function SelectableOffsetInChunk(const Chunk: TMarkDownCopyChunk;
+      SourcePos: Integer): Integer;
     // Selectable-text builders, used while Paint walks the block layout.
     function FindSourceStart(const AText: string): Integer;
-    procedure AddCopyChunk(TextStart, SourceStart: Integer;
+    function SliceMap(const Map: TArray<Integer>;
+      Start0, Count: Integer): TArray<Integer>;
+    function ResolveChunkSourceMap(const AText: string;
+      const AProvided: TArray<Integer>; AHasSource: Boolean): TArray<Integer>;
+    procedure AddCopyChunk(TextStart: Integer; const ASourceMap: TArray<Integer>;
       const AText, AMarkdownText: string);
     function AddSelectableRun(const ARect: TRect; const AText: string;
+      const ASourceMap: TArray<Integer>;
       const AMarkdownText: string = ''): Integer;
     procedure AddSelectableText(const AText: string;
-      const AMarkdownText: string = ''; AHasSource: Boolean = True);
+      const AMarkdownText: string = ''; AHasSource: Boolean = True;
+      const ASourceMap: TArray<Integer> = nil);
     procedure AddSelectableBreak(AHasSource: Boolean = True);
     procedure DrawCaret;
     function SelectionRange(out SelStart, SelEnd: Integer): Boolean;
@@ -796,27 +804,46 @@ function TMarkDownViewer.SelectableToSourcePosition(Position: Integer): Integer;
 var
   Chunk: TMarkDownCopyChunk;
   I: Integer;
+  Local: Integer;
 begin
   Result := 0;
   Position := EnsureRange(Position, 0, Length(FSelectableText));
   for I := 0 to FCopyChunks.Count - 1 do
   begin
     Chunk := FCopyChunks[I];
-    if Chunk.SourceStartIndex < 0 then
+    if Length(Chunk.SourceMap) = 0 then
       Continue;
     if Position < Chunk.StartIndex then
-      Exit(Chunk.SourceStartIndex);
+      Exit(Chunk.SourceMap[0]);
     if (Position = Chunk.StartIndex + Length(Chunk.Text)) and
       (I < FCopyChunks.Count - 1) and
       (FCopyChunks[I + 1].StartIndex = Position) and
-      (FCopyChunks[I + 1].SourceStartIndex >= 0) then
+      (Length(FCopyChunks[I + 1].SourceMap) > 0) then
       Continue;
     if Position <= Chunk.StartIndex + Length(Chunk.Text) then
-      Exit(Chunk.SourceStartIndex +
-        EnsureRange(Position - Chunk.StartIndex, 0, Length(Chunk.Text)));
-    Result := Chunk.SourceStartIndex + Length(Chunk.Text);
+    begin
+      Local := EnsureRange(Position - Chunk.StartIndex, 0, Length(Chunk.Text));
+      Exit(Chunk.SourceMap[Local]);
+    end;
+    Result := Chunk.SourceMap[Length(Chunk.Text)];
   end;
   Result := EnsureRange(Result, 0, Length(FMarkdown.Text));
+end;
+
+// The character index within a chunk whose source covers SourcePos. SourceMap
+// is monotonic, so this is the last entry that does not exceed SourcePos -
+// keeping the caret on, say, a decoded entity for any offset inside its span.
+function TMarkDownViewer.SelectableOffsetInChunk(
+  const Chunk: TMarkDownCopyChunk; SourcePos: Integer): Integer;
+var
+  K: Integer;
+begin
+  Result := 0;
+  for K := 0 to Length(Chunk.Text) do
+    if Chunk.SourceMap[K] <= SourcePos then
+      Result := K
+    else
+      Break;
 end;
 
 function TMarkDownViewer.SourceToSelectablePosition(Position: Integer): Integer;
@@ -829,13 +856,12 @@ begin
   for I := 0 to FCopyChunks.Count - 1 do
   begin
     Chunk := FCopyChunks[I];
-    if Chunk.SourceStartIndex < 0 then
+    if Length(Chunk.SourceMap) = 0 then
       Continue;
-    if Position < Chunk.SourceStartIndex then
+    if Position < Chunk.SourceMap[0] then
       Exit(Chunk.StartIndex);
-    if Position <= Chunk.SourceStartIndex + Length(Chunk.Text) then
-      Exit(Chunk.StartIndex +
-        EnsureRange(Position - Chunk.SourceStartIndex, 0, Length(Chunk.Text)));
+    if Position <= Chunk.SourceMap[Length(Chunk.Text)] then
+      Exit(Chunk.StartIndex + SelectableOffsetInChunk(Chunk, Position));
     Result := Chunk.StartIndex + Length(Chunk.Text);
   end;
   Result := EnsureRange(Result, 0, Length(FSelectableText));
@@ -1561,8 +1587,55 @@ begin
   FSourceScanPosition := FoundAt + Length(AText);
 end;
 
-procedure TMarkDownViewer.AddCopyChunk(TextStart, SourceStart: Integer;
-  const AText, AMarkdownText: string);
+// Returns Map[Start0 .. Start0+Count] (Count+1 entries), or empty when Map is
+// empty or the range falls outside it - so an unmapped token degrades to the
+// heuristic instead of slicing garbage.
+function TMarkDownViewer.SliceMap(const Map: TArray<Integer>;
+  Start0, Count: Integer): TArray<Integer>;
+var
+  K: Integer;
+begin
+  if (Length(Map) = 0) or (Start0 < 0) or
+    (Start0 + Count + 1 > Length(Map)) then
+    Exit(nil);
+  SetLength(Result, Count + 1);
+  for K := 0 to Count do
+    Result[K] := Map[Start0 + K];
+end;
+
+// Decides a chunk's per-character source map: the exact map handed down from
+// the inline parser when it lines up with the text, otherwise a linear map
+// recovered by the FindSourceStart heuristic (for block kinds not yet mapped),
+// or empty when the text has no source at all.
+function TMarkDownViewer.ResolveChunkSourceMap(const AText: string;
+  const AProvided: TArray<Integer>; AHasSource: Boolean): TArray<Integer>;
+var
+  Start: Integer;
+  K: Integer;
+begin
+  if Length(AProvided) = Length(AText) + 1 then
+  begin
+    // An exact map bypasses FindSourceStart, so keep the heuristic scan in step
+    // for any later fallback text (e.g. the trailing line break) by advancing it
+    // past this run's source.
+    if Length(AProvided) > 0 then
+      FSourceScanPosition := Max(FSourceScanPosition,
+        AProvided[High(AProvided)] + 1);
+    Exit(AProvided);
+  end;
+  Result := nil;
+  if not AHasSource then
+    Exit;
+  Start := FindSourceStart(AText);
+  if Start < 0 then
+    Exit;
+  SetLength(Result, Length(AText) + 1);
+  for K := 0 to Length(AText) do
+    Result[K] := Start + K;
+end;
+
+procedure TMarkDownViewer.AddCopyChunk(TextStart: Integer;
+  const ASourceMap: TArray<Integer>; const AText, AMarkdownText: string);
 var
   Chunk: TMarkDownCopyChunk;
 begin
@@ -1570,7 +1643,7 @@ begin
     Exit;
 
   Chunk.StartIndex := TextStart;
-  Chunk.SourceStartIndex := SourceStart;
+  Chunk.SourceMap := ASourceMap;
   Chunk.Text := AText;
   if AMarkdownText <> '' then
     Chunk.MarkdownText := AMarkdownText
@@ -1580,14 +1653,17 @@ begin
 end;
 
 function TMarkDownViewer.AddSelectableRun(const ARect: TRect;
-  const AText: string; const AMarkdownText: string): Integer;
+  const AText: string; const ASourceMap: TArray<Integer>;
+  const AMarkdownText: string): Integer;
 var
   Run: TMarkDownTextRun;
+  Map: TArray<Integer>;
 begin
   Result := Length(FSelectableText);
   if AText = '' then
     Exit;
 
+  Map := ResolveChunkSourceMap(AText, ASourceMap, True);
   Run.Rect := ARect;
   Run.FontName := Canvas.Font.Name;
   Run.FontSize := Canvas.Font.Size;
@@ -1597,17 +1673,20 @@ begin
   else
     Run.MarkdownText := AText;
   Run.StartIndex := Result;
-  Run.SourceStartIndex := FindSourceStart(AText);
+  if Length(Map) > 0 then
+    Run.SourceStartIndex := Map[0]
+  else
+    Run.SourceStartIndex := -1;
   Run.Text := AText;
   FTextRuns.Add(Run);
   FSelectableText := FSelectableText + AText;
-  AddCopyChunk(Result, Run.SourceStartIndex, AText, AMarkdownText);
+  AddCopyChunk(Result, Map, AText, AMarkdownText);
 end;
 
 procedure TMarkDownViewer.AddSelectableText(const AText: string;
-  const AMarkdownText: string; AHasSource: Boolean);
+  const AMarkdownText: string; AHasSource: Boolean;
+  const ASourceMap: TArray<Integer>);
 var
-  SourceStart: Integer;
   TextStart: Integer;
 begin
   if AText = '' then
@@ -1615,11 +1694,8 @@ begin
 
   TextStart := Length(FSelectableText);
   FSelectableText := FSelectableText + AText;
-  if AHasSource then
-    SourceStart := FindSourceStart(AText)
-  else
-    SourceStart := -1;
-  AddCopyChunk(TextStart, SourceStart, AText, AMarkdownText);
+  AddCopyChunk(TextStart, ResolveChunkSourceMap(AText, ASourceMap, AHasSource),
+    AText, AMarkdownText);
 end;
 
 // AHasSource=False marks breaks that exist only in the rendered layout
@@ -1974,7 +2050,9 @@ var
             AtomMarkdown := PendingMarkdownPrefix + AtomMarkdown;
             PendingMarkdownPrefix := '';
           end;
-          TextStart := AddSelectableRun(AtomRect, Atom, AtomMarkdown);
+          TextStart := AddSelectableRun(AtomRect, Atom,
+            SliceMap(ATokens[TokenIndex].SourceMap, AtomStart - 1, Length(Atom)),
+            AtomMarkdown);
           if (YPos + LineHeight >= 0) and (YPos <= ClientHeight) then
           begin
             if ATokens[TokenIndex].IsCode then
@@ -2390,7 +2468,7 @@ begin
                   Rect(TextLeft + 8, Y + 8 + (LineIndex * LineHeight),
                     TextLeft + 8 + Canvas.TextWidth(Lines[LineIndex]),
                     Y + 8 + (LineIndex * LineHeight) + LineHeight),
-                  Lines[LineIndex]);
+                  Lines[LineIndex], nil);
                 if (Y + 8 + (LineIndex * LineHeight) + LineHeight >= 0) and
                   (Y + 8 + (LineIndex * LineHeight) <= ClientHeight) then
                 begin

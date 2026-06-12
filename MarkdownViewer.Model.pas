@@ -88,7 +88,11 @@ type
 
   TMarkDownCopyChunk = record
     MarkdownText: string;
-    SourceStartIndex: Integer;
+    // Per-character document offsets for Text (with a trailing end entry), so a
+    // selectable position inside this chunk maps exactly back to the source even
+    // when characters such as decoded entities span several source characters.
+    // Empty when the chunk has no source (rendering-only breaks).
+    SourceMap: TArray<Integer>;
     StartIndex: Integer;
     Text: string;
   end;
