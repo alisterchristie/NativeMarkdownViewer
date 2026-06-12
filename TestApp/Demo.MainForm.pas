@@ -58,7 +58,27 @@ type
     pnlOptions: TPanel;
     lblHeadingColor: TLabel;
     cbbHeadingRuleColor: TColorBox;
+    lblCodeBackground: TLabel;
+    cbbCodeBackgroundColor: TColorBox;
+    lblQuoteBar: TLabel;
+    cbbQuoteBarColor: TColorBox;
+    lblLinkColor: TLabel;
+    cbbLinkColor: TColorBox;
+    lblSearchHighlight: TLabel;
+    cbbSearchHighlightColor: TColorBox;
+    lblBackground: TLabel;
+    cbbBackgroundColor: TColorBox;
+    lblCodeFont: TLabel;
+    cmbCodeFontName: TComboBox;
+    btnResetProperties: TButton;
+    procedure btnResetPropertiesClick(Sender: TObject);
     procedure cbbHeadingRuleColorChange(Sender: TObject);
+    procedure cbbCodeBackgroundColorChange(Sender: TObject);
+    procedure cbbQuoteBarColorChange(Sender: TObject);
+    procedure cbbLinkColorChange(Sender: TObject);
+    procedure cbbSearchHighlightColorChange(Sender: TObject);
+    procedure cbbBackgroundColorChange(Sender: TObject);
+    procedure cmbCodeFontNameChange(Sender: TObject);
     procedure ClearFindClick(Sender: TObject);
     procedure CopyClick(Sender: TObject);
     procedure CutClick(Sender: TObject);
@@ -104,6 +124,7 @@ type
     procedure SyncViewerToEditor;
     procedure UpdateInterface;
     procedure UpdateStatusBar;
+    procedure SetupControls(Reset: Boolean);
   protected
     procedure CreateParams(var Params: TCreateParams); override;
   public
@@ -118,7 +139,8 @@ uses
   System.SysUtils,
   System.UITypes,
   Winapi.ShellAPI,
-  Winapi.Windows;
+  Winapi.Windows,
+  Vcl.Graphics;
 
 {$R *.dfm}
 
@@ -216,9 +238,45 @@ begin
   inherited Destroy;
 end;
 
+procedure TMainForm.btnResetPropertiesClick(Sender: TObject);
+begin
+  SetupControls(True);
+end;
+
 procedure TMainForm.cbbHeadingRuleColorChange(Sender: TObject);
 begin
   Viewer.HeadingRuleColor := cbbHeadingRuleColor.Selected;
+end;
+
+procedure TMainForm.cbbCodeBackgroundColorChange(Sender: TObject);
+begin
+  Viewer.CodeBackgroundColor := cbbCodeBackgroundColor.Selected;
+end;
+
+procedure TMainForm.cbbQuoteBarColorChange(Sender: TObject);
+begin
+  Viewer.QuoteBarColor := cbbQuoteBarColor.Selected;
+end;
+
+procedure TMainForm.cbbLinkColorChange(Sender: TObject);
+begin
+  Viewer.LinkColor := cbbLinkColor.Selected;
+end;
+
+procedure TMainForm.cbbSearchHighlightColorChange(Sender: TObject);
+begin
+  Viewer.SearchHighlightColor := cbbSearchHighlightColor.Selected;
+end;
+
+procedure TMainForm.cbbBackgroundColorChange(Sender: TObject);
+begin
+  Viewer.Color := cbbBackgroundColor.Selected;
+end;
+
+procedure TMainForm.cmbCodeFontNameChange(Sender: TObject);
+begin
+  if cmbCodeFontName.Text <> '' then
+    Viewer.CodeFontName := cmbCodeFontName.Text;
 end;
 
 procedure TMainForm.EditorChanged(Sender: TObject);
@@ -251,6 +309,42 @@ begin
   UpdateStatusBar;
 end;
 
+procedure TMainForm.SetupControls(Reset: Boolean);
+begin
+  if Reset then
+  begin
+    cbbHeadingRuleColor.Selected := clNone;
+    Viewer.HeadingRuleColor := clNone;
+
+    cbbCodeBackgroundColor.Selected := clDefault;
+    Viewer.CodeBackgroundColor := clDefault;
+
+    cbbQuoteBarColor.Selected := clDefault;
+    Viewer.QuoteBarColor := clDefault;
+
+    cbbLinkColor.Selected := clDefault;
+    Viewer.LinkColor := clDefault;
+
+    cbbSearchHighlightColor.Selected := clDefault;
+    Viewer.SearchHighlightColor := clDefault;
+
+    cbbBackgroundColor.Selected := clDefault;
+
+    cmbCodeFontName.Text := 'Consolas';
+    Viewer.CodeFontName := 'Consolas';
+  end
+  else
+  begin
+    cbbHeadingRuleColor.Selected := Viewer.HeadingRuleColor;
+    cbbCodeBackgroundColor.Selected := Viewer.CodeBackgroundColor;
+    cbbQuoteBarColor.Selected := Viewer.QuoteBarColor;
+    cbbLinkColor.Selected := Viewer.LinkColor;
+    cbbSearchHighlightColor.Selected := Viewer.SearchHighlightColor;
+    cbbBackgroundColor.Selected := Viewer.Color;
+    cmbCodeFontName.Text := Viewer.CodeFontName;
+  end;
+end;
+
 procedure TMainForm.FormCreate(Sender: TObject);
 begin
   FEditorWindowProc := Editor.WindowProc;
@@ -263,7 +357,7 @@ begin
   FindEdit.OnKeyDown := FindEditKeyDown;
   FindEdit.OnKeyPress := FindEditKeyPress;
   FindEdit.Text := 'markdown';
-  cbbHeadingRuleColor.Selected := Viewer.HeadingRuleColor;
+  SetupControls(False);
   UpdateInterface;
 end;
 

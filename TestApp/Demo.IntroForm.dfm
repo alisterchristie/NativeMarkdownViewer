@@ -14,8 +14,8 @@ object frmIntro: TfrmIntro
   object lblStyle: TLabel
     Left = 8
     Top = 8
-    Width = 113
-    Height = 17
+    Width = 59
+    Height = 15
     Caption = 'Visual Style'
   end
   object btnBasicDemo: TButton

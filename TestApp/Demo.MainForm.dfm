@@ -43,7 +43,6 @@ object MainForm: TMainForm
     BevelOuter = bvNone
     ShowCaption = False
     TabOrder = 2
-    ExplicitWidth = 928
     DesignSize = (
       1092
       34)
@@ -89,7 +88,6 @@ object MainForm: TMainForm
       Anchors = [akLeft, akTop, akRight]
       TabOrder = 3
       OnChange = FindChanged
-      ExplicitWidth = 224
     end
     object ClearFindButton: TButton
       Left = 646
@@ -100,7 +98,6 @@ object MainForm: TMainForm
       Caption = 'Clear'
       TabOrder = 4
       OnClick = ClearFindClick
-      ExplicitLeft = 482
     end
   end
   object Viewer: TMarkDownViewer
@@ -123,7 +120,6 @@ object MainForm: TMainForm
     OnChange = ViewerChanged
     OnLinkClick = LinkClicked
     OnScroll = SyncEditorToViewer
-    ExplicitWidth = 532
   end
   object StatusBar: TStatusBar
     Left = 0
@@ -132,7 +128,6 @@ object MainForm: TMainForm
     Height = 22
     Panels = <>
     SimplePanel = True
-    ExplicitWidth = 928
   end
   object pnlOptions: TPanel
     Left = 907
@@ -143,29 +138,199 @@ object MainForm: TMainForm
     Caption = 'pnlProperties'
     ShowCaption = False
     TabOrder = 4
-    ExplicitTop = 28
+    ExplicitLeft = 913
+    ExplicitTop = 40
     object lblHeadingColor: TLabel
       AlignWithMargins = True
       Left = 4
-      Top = 4
+      Top = 38
       Width = 177
       Height = 15
+      Margins.Bottom = 0
       Align = alTop
       Caption = 'Heading Rule Color'
+      ExplicitTop = 4
       ExplicitWidth = 103
+    end
+    object lblCodeBackground: TLabel
+      AlignWithMargins = True
+      Left = 4
+      Top = 87
+      Width = 177
+      Height = 15
+      Margins.Bottom = 0
+      Align = alTop
+      Caption = 'Code Background Color'
+      ExplicitTop = 53
+      ExplicitWidth = 127
+    end
+    object lblQuoteBar: TLabel
+      AlignWithMargins = True
+      Left = 4
+      Top = 136
+      Width = 177
+      Height = 15
+      Margins.Bottom = 0
+      Align = alTop
+      Caption = 'Quote Bar Color'
+      ExplicitTop = 102
+      ExplicitWidth = 85
+    end
+    object lblLinkColor: TLabel
+      AlignWithMargins = True
+      Left = 4
+      Top = 185
+      Width = 177
+      Height = 15
+      Margins.Bottom = 0
+      Align = alTop
+      Caption = 'Link Color'
+      ExplicitTop = 151
+      ExplicitWidth = 54
+    end
+    object lblSearchHighlight: TLabel
+      AlignWithMargins = True
+      Left = 4
+      Top = 234
+      Width = 177
+      Height = 15
+      Margins.Bottom = 0
+      Align = alTop
+      Caption = 'Search Highlight Color'
+      ExplicitTop = 200
+      ExplicitWidth = 120
+    end
+    object lblBackground: TLabel
+      AlignWithMargins = True
+      Left = 4
+      Top = 283
+      Width = 177
+      Height = 15
+      Margins.Bottom = 0
+      Align = alTop
+      Caption = 'Background Color'
+      ExplicitTop = 249
+      ExplicitWidth = 96
+    end
+    object lblCodeFont: TLabel
+      AlignWithMargins = True
+      Left = 4
+      Top = 332
+      Width = 177
+      Height = 15
+      Margins.Bottom = 0
+      Align = alTop
+      Caption = 'Code Font'
+      ExplicitTop = 298
+      ExplicitWidth = 55
     end
     object cbbHeadingRuleColor: TColorBox
       AlignWithMargins = True
       Left = 4
-      Top = 25
+      Top = 56
       Width = 177
       Height = 22
+      Margins.Bottom = 6
       Align = alTop
       TabOrder = 0
       OnChange = cbbHeadingRuleColorChange
+      ExplicitTop = 25
+    end
+    object cbbCodeBackgroundColor: TColorBox
+      AlignWithMargins = True
+      Left = 4
+      Top = 105
+      Width = 177
+      Height = 22
+      Margins.Bottom = 6
+      Align = alTop
+      TabOrder = 1
+      OnChange = cbbCodeBackgroundColorChange
+      ExplicitTop = 74
+    end
+    object cbbQuoteBarColor: TColorBox
+      AlignWithMargins = True
+      Left = 4
+      Top = 154
+      Width = 177
+      Height = 22
+      Margins.Bottom = 6
+      Align = alTop
+      TabOrder = 2
+      OnChange = cbbQuoteBarColorChange
+      ExplicitTop = 123
+    end
+    object cbbLinkColor: TColorBox
+      AlignWithMargins = True
+      Left = 4
+      Top = 203
+      Width = 177
+      Height = 22
+      Margins.Bottom = 6
+      Align = alTop
+      TabOrder = 3
+      OnChange = cbbLinkColorChange
+      ExplicitTop = 172
+    end
+    object cbbSearchHighlightColor: TColorBox
+      AlignWithMargins = True
+      Left = 4
+      Top = 252
+      Width = 177
+      Height = 22
+      Margins.Bottom = 6
+      Align = alTop
+      TabOrder = 4
+      OnChange = cbbSearchHighlightColorChange
+      ExplicitTop = 221
+    end
+    object cbbBackgroundColor: TColorBox
+      AlignWithMargins = True
+      Left = 4
+      Top = 301
+      Width = 177
+      Height = 22
+      Margins.Bottom = 6
+      Align = alTop
+      TabOrder = 5
+      OnChange = cbbBackgroundColorChange
+      ExplicitTop = 270
+    end
+    object cmbCodeFontName: TComboBox
+      AlignWithMargins = True
+      Left = 4
+      Top = 350
+      Width = 177
+      Height = 23
+      Margins.Bottom = 6
+      Align = alTop
+      TabOrder = 6
+      Text = 'Consolas'
+      OnChange = cmbCodeFontNameChange
+      Items.Strings = (
+        'Consolas'
+        'Courier New'
+        'Cascadia Code'
+        'Cascadia Mono'
+        'Lucida Console'
+        'Fira Code'
+        'JetBrains Mono')
+      ExplicitTop = 319
+    end
+    object btnResetProperties: TButton
+      AlignWithMargins = True
+      Left = 4
+      Top = 4
+      Width = 177
+      Height = 25
+      Margins.Bottom = 6
+      Align = alTop
+      Caption = 'Reset Properties'
+      TabOrder = 7
+      OnClick = btnResetPropertiesClick
       ExplicitLeft = 6
-      ExplicitTop = 120
-      ExplicitWidth = 145
+      ExplicitTop = -6
+      ExplicitWidth = 183
     end
   end
   object MainMenu: TMainMenu
