@@ -2456,6 +2456,7 @@ var
   NewLevel: Integer;
   UnderlineIdx: Integer;
   UnderlineLen: Integer;
+  SavedScrollPos: Integer;
 begin
   if FReadOnly then Exit;
   if FSelectableText = '' then Exit;
@@ -2479,12 +2480,15 @@ begin
       FUndoStack.Delete(0);
     FRedoStack.Clear;
 
+    SavedScrollPos := FScrollPos;
     FApplyingEdit := True;
     try
       FMarkdown[LineIdx] := NewLine;
     finally
       FApplyingEdit := False;
     end;
+    FScrollPos := SavedScrollPos;
+    UpdateScrollBar;
 
     NewSourcePos := OldSourcePos + 2;
     Repaint;
@@ -2521,12 +2525,15 @@ begin
         while FUndoStack.Count > MaxUndoDepth do
           FUndoStack.Delete(0);
         FRedoStack.Clear;
+        SavedScrollPos := FScrollPos;
         FApplyingEdit := True;
         try
           FMarkdown[UnderlineIdx] := '';
         finally
           FApplyingEdit := False;
         end;
+        FScrollPos := SavedScrollPos;
+        UpdateScrollBar;
         Repaint;
         FSelectionCaret := SourceToSelectablePosition(OldSourcePos);
         FSelectionAnchor := FSelectionCaret;
@@ -2545,12 +2552,15 @@ begin
       FUndoStack.Delete(0);
     FRedoStack.Clear;
 
+    SavedScrollPos := FScrollPos;
     FApplyingEdit := True;
     try
       FMarkdown[UnderlineIdx] := NewLine;
     finally
       FApplyingEdit := False;
     end;
+    FScrollPos := SavedScrollPos;
+    UpdateScrollBar;
 
     // Setext underline change doesn't affect caret position mapping
     Repaint;
@@ -2579,12 +2589,15 @@ begin
     while FUndoStack.Count > MaxUndoDepth do
       FUndoStack.Delete(0);
     FRedoStack.Clear;
+    SavedScrollPos := FScrollPos;
     FApplyingEdit := True;
     try
       FMarkdown[Block.SourceStartLine] := NewLine;
     finally
       FApplyingEdit := False;
     end;
+    FScrollPos := SavedScrollPos;
+    UpdateScrollBar;
 
     // Caret shifts back by the prefix length (including the space after #)
     NewSourcePos := OldSourcePos - OldPrefixLen;
@@ -2618,12 +2631,15 @@ begin
     FUndoStack.Delete(0);
   FRedoStack.Clear;
 
+  SavedScrollPos := FScrollPos;
   FApplyingEdit := True;
   try
     FMarkdown[Block.SourceStartLine] := NewLine;
   finally
     FApplyingEdit := False;
   end;
+  FScrollPos := SavedScrollPos;
+  UpdateScrollBar;
 
   // Adjust caret: if it was past the prefix, shift by prefix delta
   if OldSourcePos >= LineStartSourcePos(Block.SourceStartLine) + OldPrefixLen then
