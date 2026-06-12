@@ -147,6 +147,12 @@ type
     procedure RendersQuoteBlockWithDefaultColors;
     [Test]
     procedure SearchTextHighlightsMatchesOnPaint;
+    [Test]
+    procedure CtrlASelectsAllText;
+    [Test]
+    procedure CtrlZUndoesAndCtrlYRedoes;
+    [Test]
+    procedure DeleteKeyRemovesSelection;
   end;
 
 implementation
@@ -1171,6 +1177,46 @@ begin
   RepaintViewer;
 
   Assert.AreEqual(2, FViewer.SearchMatchCount);
+end;
+
+procedure TMarkDownViewerTests.CtrlASelectsAllText;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'alpha bravo';
+  RepaintViewer;
+
+  FViewer.PressKey(Ord('A'), [ssCtrl]);
+
+  Assert.AreEqual('alpha bravo', Trim(FViewer.SelectedText));
+end;
+
+procedure TMarkDownViewerTests.CtrlZUndoesAndCtrlYRedoes;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'abc';
+  RepaintViewer;
+
+  FViewer.TypeCharacter('X');
+  Assert.AreEqual('Xabc', Trim(FViewer.MarkdownText));
+
+  FViewer.PressKey(Ord('Z'), [ssCtrl]);
+  Assert.AreEqual('abc', Trim(FViewer.MarkdownText));
+
+  FViewer.PressKey(Ord('Y'), [ssCtrl]);
+  Assert.AreEqual('Xabc', Trim(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.DeleteKeyRemovesSelection;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'alpha bravo';
+  RepaintViewer;
+
+  FViewer.PressKey(Ord('A'), [ssCtrl]);
+  FViewer.PressKey(VK_DELETE);
+
+  Assert.AreEqual('', Trim(FViewer.MarkdownText));
+  Assert.AreEqual('', FViewer.SelectedText);
 end;
 
 initialization
