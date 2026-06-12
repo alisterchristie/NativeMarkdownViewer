@@ -2494,7 +2494,8 @@ begin
     FScrollPos := SavedScrollPos;
     UpdateScrollBar;
 
-    NewSourcePos := OldSourcePos + 2;
+    NewSourcePos := Min(OldSourcePos + 2,
+      LineStartSourcePos(LineIdx) + Length(NewLine));
     Repaint;
     FSelectionCaret := SourceToSelectablePosition(NewSourcePos);
     FSelectionAnchor := FSelectionCaret;
@@ -2611,6 +2612,8 @@ begin
     NewSourcePos := OldSourcePos - OldPrefixLen;
     if NewSourcePos < 0 then
       NewSourcePos := 0;
+    NewSourcePos := Min(NewSourcePos,
+      LineStartSourcePos(Block.SourceStartLine) + Length(NewLine));
     Repaint;
     FSelectionCaret := SourceToSelectablePosition(NewSourcePos);
     FSelectionAnchor := FSelectionCaret;
@@ -2654,6 +2657,8 @@ begin
     NewSourcePos := OldSourcePos + PrefixDelta
   else
     NewSourcePos := OldSourcePos;
+  NewSourcePos := Min(NewSourcePos,
+    LineStartSourcePos(Block.SourceStartLine) + Length(NewLine));
 
   Repaint;
   FSelectionCaret := SourceToSelectablePosition(NewSourcePos);
