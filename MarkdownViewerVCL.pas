@@ -2512,8 +2512,28 @@ begin
     end
     else
     begin
-      // Promote H2→H1 (change - to =) or H1 stays H1
-      if Block.Level = 1 then Exit;
+      // Promote H2→H1 (change - to =), or H1 → paragraph (remove underline)
+      if Block.Level = 1 then
+      begin
+        // Strip underline: the text line becomes a plain paragraph
+        FUndoStack.Add(FMarkdown.Text);
+        while FUndoStack.Count > MaxUndoDepth do
+          FUndoStack.Delete(0);
+        FRedoStack.Clear;
+        FApplyingEdit := True;
+        try
+          FMarkdown[UnderlineIdx] := '';
+        finally
+          FApplyingEdit := False;
+        end;
+        Repaint;
+        FSelectionCaret := SourceToSelectablePosition(OldSourcePos);
+        FSelectionAnchor := FSelectionCaret;
+        FDesiredCaretX := -1;
+        ScrollCaretIntoView;
+        Invalidate;
+        Exit;
+      end;
       // H2 → H1: change underline from - to =
       UnderlineLen := Length(Trim(FMarkdown[UnderlineIdx]));
       NewLine := StringOfChar('=', UnderlineLen);
@@ -2541,11 +2561,43 @@ begin
     Exit;
   end;
 
-  // ATX heading: change # count
+  // ATX heading: change # count or strip prefix
   OldLine := FMarkdown[Block.SourceStartLine];
   OldPrefixLen := GetHeadingPrefixLength(OldLine);
   OldLevel := Block.Level;
   if OldLevel + Delta = OldLevel then Exit;
+
+  // When promoting past H1, strip the # prefix back to plain text
+  if OldLevel + Delta < 1 then
+  begin
+    T := TMarkDownBlockParser.TrimLeftOnly(OldLine);
+    LineStart := Length(OldLine) - Length(T);
+    NewLine := Copy(OldLine, 1, LineStart) + Copy(T, OldLevel + 2, MaxInt);
+
+    FUndoStack.Add(FMarkdown.Text);
+    while FUndoStack.Count > MaxUndoDepth do
+      FUndoStack.Delete(0);
+    FRedoStack.Clear;
+    FApplyingEdit := True;
+    try
+      FMarkdown[Block.SourceStartLine] := NewLine;
+    finally
+      FApplyingEdit := False;
+    end;
+
+    // Caret shifts back by the prefix length (including the space after #)
+    NewSourcePos := OldSourcePos - OldPrefixLen;
+    if NewSourcePos < 0 then
+      NewSourcePos := 0;
+    Repaint;
+    FSelectionCaret := SourceToSelectablePosition(NewSourcePos);
+    FSelectionAnchor := FSelectionCaret;
+    FDesiredCaretX := -1;
+    ScrollCaretIntoView;
+    Invalidate;
+    Exit;
+  end;
+
   NewLevel := EnsureRange(OldLevel + Delta, 1, 6);
   if NewLevel = OldLevel then Exit;
 
