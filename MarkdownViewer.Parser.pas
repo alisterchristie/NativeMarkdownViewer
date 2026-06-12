@@ -22,7 +22,8 @@ type
     class function ParseBlocks(Lines: TStrings;
       StartLine: Integer = 0): TMarkDownBlockList; static;
     class function ParseInline(const Text: string;
-      References: TStrings = nil): TMarkDownInlineList; static;
+      References: TStrings = nil;
+      const SourceMap: TArray<Integer> = nil): TMarkDownInlineList; static;
     class function StartsWithFence(const S: string): Boolean; static;
     class procedure SplitTableRow(const Line: string; Cells: TStrings); static;
     class function TrimLeftOnly(const S: string): string; static;
@@ -779,7 +780,8 @@ begin
 end;
 
 procedure AddRun(Tokens: TMarkDownInlineList; const Text: string;
-  Style: TFontStyles; IsCode: Boolean; const Url: string);
+  Style: TFontStyles; IsCode: Boolean; const Url: string;
+  const AMap: TArray<Integer>);
 var
   Token: TMarkDownInlineToken;
 begin
@@ -790,7 +792,28 @@ begin
   Token.Style := Style;
   Token.IsCode := IsCode;
   Token.Url := Url;
+  // A map is only attached when it lines up with Text; a mismatch means the
+  // caller had no usable source map, so leave it empty and let the viewer fall
+  // back rather than risk a wrong mapping.
+  if Length(AMap) = Length(Text) + 1 then
+    Token.SourceMap := AMap;
   Tokens.Add(Token);
+end;
+
+// Returns Map[Start0 .. Start0 + LenChars] (LenChars + 1 entries: one per
+// character of the sub-slice plus the trailing end position). Empty when Map is
+// empty or the range would fall outside it, so callers degrade gracefully.
+function SubMap(const Map: TArray<Integer>;
+  Start0, LenChars: Integer): TArray<Integer>;
+var
+  I: Integer;
+begin
+  if (Length(Map) = 0) or (Start0 < 0) or
+    (Start0 + LenChars + 1 > Length(Map)) then
+    Exit(nil);
+  SetLength(Result, LenChars + 1);
+  for I := 0 to LenChars do
+    Result[I] := Map[Start0 + I];
 end;
 
 procedure AddLineBreak(Tokens: TMarkDownInlineList);
@@ -878,7 +901,7 @@ begin
 end;
 
 function TryReadAutoLink(const Text: string; Index: Integer; out DisplayText, Url: string;
-  out NextIndex: Integer): Boolean;
+  out NextIndex: Integer; out DisplayStart: Integer): Boolean;
 var
   I: Integer;
   HasScheme: Boolean;
@@ -887,6 +910,7 @@ begin
   DisplayText := '';
   Url := '';
   NextIndex := Index;
+  DisplayStart := Index;
 
   if Text[Index] = '<' then
   begin
@@ -898,12 +922,14 @@ begin
       begin
         Url := DisplayText;
         NextIndex := I + 1;
+        DisplayStart := Index + 1;
         Exit(True);
       end;
       if LooksLikeEmail(DisplayText) then
       begin
         Url := 'mailto:' + DisplayText;
         NextIndex := I + 1;
+        DisplayStart := Index + 1;
         Exit(True);
       end;
       DisplayText := '';
@@ -1002,195 +1028,255 @@ end;
 // Recursively splits Text into styled runs. BaseStyle and BaseUrl are inherited
 // from any enclosing emphasis or link span, so nested formatting accumulates
 // (e.g. bold text inside a link keeps both the bold style and the link url).
+// Map (when present) carries the document offset of every character of Text,
+// so each emitted token can record where its rendered text came from in the
+// source. Sub-spans pass the matching slice of Map down recursively.
 procedure ParseRuns(const Text: string; References: TStrings;
-  BaseStyle: TFontStyles; const BaseUrl: string; Tokens: TMarkDownInlineList);
+  BaseStyle: TFontStyles; const BaseUrl: string; Tokens: TMarkDownInlineList;
+  const Map: TArray<Integer>);
 var
   I: Integer;
   J: Integer;
   K: Integer;
+  C: Integer;
   NextIndex: Integer;
+  DisplayStart: Integer;
+  EntityStart: Integer;
   Buffer: string;
   LinkText: string;
   Marker: string;
   ReferenceName: string;
   LinkUrl: string;
   Decoded: string;
+  HasMap: Boolean;
+  BufferMap: TList<Integer>;
+  BufferEnd: Integer;
+
+  // The accumulated buffer's per-character offsets plus a trailing end position.
+  function CurrentBufferMap: TArray<Integer>;
+  begin
+    if not HasMap then
+      Exit(nil);
+    Result := BufferMap.ToArray;
+    SetLength(Result, Length(Result) + 1);
+    Result[High(Result)] := BufferEnd;
+  end;
 
   procedure FlushBuffer;
   begin
-    AddRun(Tokens, Buffer, BaseStyle, False, BaseUrl);
+    AddRun(Tokens, Buffer, BaseStyle, False, BaseUrl, CurrentBufferMap);
     Buffer := '';
+    if HasMap then
+      BufferMap.Clear;
+  end;
+
+  // Record a buffered character that starts at document offset StartOffset and
+  // whose source ends just before AfterOffset.
+  procedure PushChar(StartOffset, AfterOffset: Integer);
+  begin
+    if HasMap then
+    begin
+      BufferMap.Add(StartOffset);
+      BufferEnd := AfterOffset;
+    end;
   end;
 
 begin
-  Buffer := '';
-  I := 1;
-  while I <= Length(Text) do
-  begin
-    if (Text[I] = '\') and (I < Length(Text)) and
-      CharInSet(Text[I + 1], ['\', '`', '*', '_', '{', '}', '[', ']', '(', ')', '#', '+', '-', '.', '!', '>', '~', '|']) then
+  HasMap := Length(Map) = Length(Text) + 1;
+  BufferEnd := 0;
+  BufferMap := TList<Integer>.Create;
+  try
+    Buffer := '';
+    I := 1;
+    while I <= Length(Text) do
     begin
-      Buffer := Buffer + Text[I + 1];
-      Inc(I, 2);
-      Continue;
-    end;
-
-    // A bare line feed marks a hard line break introduced by the block parser
-    // (two trailing spaces or a trailing backslash in the source).
-    if Text[I] = #10 then
-    begin
-      FlushBuffer;
-      AddLineBreak(Tokens);
-      Inc(I);
-      Continue;
-    end;
-
-    if (Text[I] = '&') and TryDecodeEntity(Text, I, Decoded) then
-    begin
-      Buffer := Buffer + Decoded;
-      Continue;
-    end;
-
-    if TryReadAutoLink(Text, I, LinkText, LinkUrl, NextIndex) then
-    begin
-      FlushBuffer;
-      AddRun(Tokens, LinkText, BaseStyle, False, LinkUrl);
-      I := NextIndex;
-      Continue;
-    end;
-
-    if Text[I] = '`' then
-    begin
-      J := FindUnescaped('`', Text, I + 1);
-      if J > I then
+      if (Text[I] = '\') and (I < Length(Text)) and
+        CharInSet(Text[I + 1], ['\', '`', '*', '_', '{', '}', '[', ']', '(', ')', '#', '+', '-', '.', '!', '>', '~', '|']) then
       begin
-        FlushBuffer;
-        AddRun(Tokens, Copy(Text, I + 1, J - I - 1), BaseStyle, True, BaseUrl);
-        I := J + 1;
+        Buffer := Buffer + Text[I + 1];
+        if HasMap then
+          PushChar(Map[I - 1], Map[I + 1]); // covers the backslash and the char
+        Inc(I, 2);
         Continue;
       end;
-    end;
 
-    Marker := Copy(Text, I, 3);
-    if (Marker = '***') or (Marker = '___') then
-    begin
-      if CanOpenEmphasis(Text, I, 3, Marker = '___') then
+      // A bare line feed marks a hard line break introduced by the block parser
+      // (two trailing spaces or a trailing backslash in the source).
+      if Text[I] = #10 then
       begin
-        J := FindUnescaped(Marker, Text, I + 3);
-        if (J > I + 3) and CanCloseEmphasis(Text, J, 3, Marker = '___') then
+        FlushBuffer;
+        AddLineBreak(Tokens);
+        Inc(I);
+        Continue;
+      end;
+
+      if Text[I] = '&' then
+      begin
+        EntityStart := I;
+        if TryDecodeEntity(Text, I, Decoded) then
         begin
-          FlushBuffer;
-          ParseRuns(Copy(Text, I + 3, J - I - 3), References,
-            BaseStyle + [fsBold, fsItalic], BaseUrl, Tokens);
-          I := J + 3;
-          Continue;
-        end;
-      end;
-    end;
-
-    if (Copy(Text, I, 2) = '~~') and CanOpenEmphasis(Text, I, 2, False) then
-    begin
-      J := FindUnescaped('~~', Text, I + 2);
-      if (J > I + 2) and CanCloseEmphasis(Text, J, 2, False) then
-      begin
-        FlushBuffer;
-        ParseRuns(Copy(Text, I + 2, J - I - 2), References,
-          BaseStyle + [fsStrikeOut], BaseUrl, Tokens);
-        I := J + 2;
-        Continue;
-      end;
-    end;
-
-    if (Copy(Text, I, 2) = '**') and CanOpenEmphasis(Text, I, 2, False) then
-    begin
-      J := FindUnescaped('**', Text, I + 2);
-      if (J > I + 2) and CanCloseEmphasis(Text, J, 2, False) then
-      begin
-        FlushBuffer;
-        ParseRuns(Copy(Text, I + 2, J - I - 2), References,
-          BaseStyle + [fsBold], BaseUrl, Tokens);
-        I := J + 2;
-        Continue;
-      end;
-    end;
-
-    if (Copy(Text, I, 2) = '__') and CanOpenEmphasis(Text, I, 2, True) then
-    begin
-      J := FindUnescaped('__', Text, I + 2);
-      if (J > I + 2) and CanCloseEmphasis(Text, J, 2, True) then
-      begin
-        FlushBuffer;
-        ParseRuns(Copy(Text, I + 2, J - I - 2), References,
-          BaseStyle + [fsBold], BaseUrl, Tokens);
-        I := J + 2;
-        Continue;
-      end;
-    end;
-
-    if CharInSet(Text[I], ['*', '_']) and
-      CanOpenEmphasis(Text, I, 1, Text[I] = '_') then
-    begin
-      J := FindUnescaped(Text[I], Text, I + 1);
-      if (J > I + 1) and CanCloseEmphasis(Text, J, 1, Text[I] = '_') then
-      begin
-        FlushBuffer;
-        ParseRuns(Copy(Text, I + 1, J - I - 1), References,
-          BaseStyle + [fsItalic], BaseUrl, Tokens);
-        I := J + 1;
-        Continue;
-      end;
-    end;
-
-    // Links are only parsed at the top level (no link is opened inside another
-    // link), so a non-empty BaseUrl skips link recognition.
-    if (BaseUrl = '') and (Text[I] = '[') then
-    begin
-      J := FindUnescaped(']', Text, I + 1);
-      if (J > I) and (J < Length(Text)) and (Text[J + 1] = '(') then
-      begin
-        K := FindUnescaped(')', Text, J + 2);
-        if K > J then
-        begin
-          FlushBuffer;
-          ParseRuns(Copy(Text, I + 1, J - I - 1), References, BaseStyle,
-            LinkDestination(Copy(Text, J + 2, K - J - 2)), Tokens);
-          I := K + 1;
+          Buffer := Buffer + Decoded;
+          if HasMap then
+            for C := 1 to Length(Decoded) do
+              PushChar(Map[EntityStart - 1], Map[I - 1]); // whole &...; span
           Continue;
         end;
       end;
 
-      if (References <> nil) and (J > I) and (J < Length(Text)) and (Text[J + 1] = '[') then
+      if TryReadAutoLink(Text, I, LinkText, LinkUrl, NextIndex, DisplayStart) then
       begin
-        K := FindUnescaped(']', Text, J + 2);
-        if K > J then
+        FlushBuffer;
+        AddRun(Tokens, LinkText, BaseStyle, False, LinkUrl,
+          SubMap(Map, DisplayStart - 1, Length(LinkText)));
+        I := NextIndex;
+        Continue;
+      end;
+
+      if Text[I] = '`' then
+      begin
+        J := FindUnescaped('`', Text, I + 1);
+        if J > I then
         begin
-          LinkText := Copy(Text, I + 1, J - I - 1);
-          ReferenceName := Trim(Copy(Text, J + 2, K - J - 2));
-          if ReferenceName = '' then
-            ReferenceName := LinkText;
-          LinkUrl := References.Values[LowerCase(ReferenceName)];
-          if LinkUrl <> '' then
+          FlushBuffer;
+          AddRun(Tokens, Copy(Text, I + 1, J - I - 1), BaseStyle, True, BaseUrl,
+            SubMap(Map, I, J - I - 1));
+          I := J + 1;
+          Continue;
+        end;
+      end;
+
+      Marker := Copy(Text, I, 3);
+      if (Marker = '***') or (Marker = '___') then
+      begin
+        if CanOpenEmphasis(Text, I, 3, Marker = '___') then
+        begin
+          J := FindUnescaped(Marker, Text, I + 3);
+          if (J > I + 3) and CanCloseEmphasis(Text, J, 3, Marker = '___') then
           begin
             FlushBuffer;
-            ParseRuns(LinkText, References, BaseStyle, LinkUrl, Tokens);
-            I := K + 1;
+            ParseRuns(Copy(Text, I + 3, J - I - 3), References,
+              BaseStyle + [fsBold, fsItalic], BaseUrl, Tokens,
+              SubMap(Map, I + 2, J - I - 3));
+            I := J + 3;
             Continue;
           end;
         end;
       end;
-    end;
 
-    Buffer := Buffer + Text[I];
-    Inc(I);
+      if (Copy(Text, I, 2) = '~~') and CanOpenEmphasis(Text, I, 2, False) then
+      begin
+        J := FindUnescaped('~~', Text, I + 2);
+        if (J > I + 2) and CanCloseEmphasis(Text, J, 2, False) then
+        begin
+          FlushBuffer;
+          ParseRuns(Copy(Text, I + 2, J - I - 2), References,
+            BaseStyle + [fsStrikeOut], BaseUrl, Tokens,
+            SubMap(Map, I + 1, J - I - 2));
+          I := J + 2;
+          Continue;
+        end;
+      end;
+
+      if (Copy(Text, I, 2) = '**') and CanOpenEmphasis(Text, I, 2, False) then
+      begin
+        J := FindUnescaped('**', Text, I + 2);
+        if (J > I + 2) and CanCloseEmphasis(Text, J, 2, False) then
+        begin
+          FlushBuffer;
+          ParseRuns(Copy(Text, I + 2, J - I - 2), References,
+            BaseStyle + [fsBold], BaseUrl, Tokens,
+            SubMap(Map, I + 1, J - I - 2));
+          I := J + 2;
+          Continue;
+        end;
+      end;
+
+      if (Copy(Text, I, 2) = '__') and CanOpenEmphasis(Text, I, 2, True) then
+      begin
+        J := FindUnescaped('__', Text, I + 2);
+        if (J > I + 2) and CanCloseEmphasis(Text, J, 2, True) then
+        begin
+          FlushBuffer;
+          ParseRuns(Copy(Text, I + 2, J - I - 2), References,
+            BaseStyle + [fsBold], BaseUrl, Tokens,
+            SubMap(Map, I + 1, J - I - 2));
+          I := J + 2;
+          Continue;
+        end;
+      end;
+
+      if CharInSet(Text[I], ['*', '_']) and
+        CanOpenEmphasis(Text, I, 1, Text[I] = '_') then
+      begin
+        J := FindUnescaped(Text[I], Text, I + 1);
+        if (J > I + 1) and CanCloseEmphasis(Text, J, 1, Text[I] = '_') then
+        begin
+          FlushBuffer;
+          ParseRuns(Copy(Text, I + 1, J - I - 1), References,
+            BaseStyle + [fsItalic], BaseUrl, Tokens,
+            SubMap(Map, I, J - I - 1));
+          I := J + 1;
+          Continue;
+        end;
+      end;
+
+      // Links are only parsed at the top level (no link is opened inside another
+      // link), so a non-empty BaseUrl skips link recognition.
+      if (BaseUrl = '') and (Text[I] = '[') then
+      begin
+        J := FindUnescaped(']', Text, I + 1);
+        if (J > I) and (J < Length(Text)) and (Text[J + 1] = '(') then
+        begin
+          K := FindUnescaped(')', Text, J + 2);
+          if K > J then
+          begin
+            FlushBuffer;
+            ParseRuns(Copy(Text, I + 1, J - I - 1), References, BaseStyle,
+              LinkDestination(Copy(Text, J + 2, K - J - 2)), Tokens,
+              SubMap(Map, I, J - I - 1));
+            I := K + 1;
+            Continue;
+          end;
+        end;
+
+        if (References <> nil) and (J > I) and (J < Length(Text)) and (Text[J + 1] = '[') then
+        begin
+          K := FindUnescaped(']', Text, J + 2);
+          if K > J then
+          begin
+            LinkText := Copy(Text, I + 1, J - I - 1);
+            ReferenceName := Trim(Copy(Text, J + 2, K - J - 2));
+            if ReferenceName = '' then
+              ReferenceName := LinkText;
+            LinkUrl := References.Values[LowerCase(ReferenceName)];
+            if LinkUrl <> '' then
+            begin
+              FlushBuffer;
+              ParseRuns(LinkText, References, BaseStyle, LinkUrl, Tokens,
+                SubMap(Map, I, J - I - 1));
+              I := K + 1;
+              Continue;
+            end;
+          end;
+        end;
+      end;
+
+      Buffer := Buffer + Text[I];
+      if HasMap then
+        PushChar(Map[I - 1], Map[I]);
+      Inc(I);
+    end;
+    FlushBuffer;
+  finally
+    BufferMap.Free;
   end;
-  FlushBuffer;
 end;
 
 class function TMarkDownBlockParser.ParseInline(const Text: string;
-  References: TStrings): TMarkDownInlineList;
+  References: TStrings; const SourceMap: TArray<Integer>): TMarkDownInlineList;
 begin
   Result := TMarkDownInlineList.Create;
-  ParseRuns(Text, References, [], '', Result);
+  ParseRuns(Text, References, [], '', Result, SourceMap);
 end;
 
 end.

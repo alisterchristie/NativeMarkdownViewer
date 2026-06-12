@@ -121,6 +121,12 @@ type
     procedure SourceMapHandlesQuoteAcrossLines;
     [Test]
     procedure SourceMapHandlesIndentedHeading;
+    [Test]
+    procedure TokenMapLocatesBoldSpan;
+    [Test]
+    procedure TokenMapHandlesEntity;
+    [Test]
+    procedure TokenMapHandlesAutoLink;
   end;
 
 implementation
@@ -1071,6 +1077,94 @@ begin
     AssertSourceMapValid(Lines, Blocks[0]);
     Assert.AreEqual(7, Blocks[0].SourceMap[0]);
   finally
+    Blocks.Free;
+    Lines.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.TokenMapLocatesBoldSpan;
+var
+  Blocks: TMarkDownBlockList;
+  Lines: TStringList;
+  Tokens: TMarkDownInlineList;
+begin
+  Lines := TStringList.Create;
+  Blocks := nil;
+  Tokens := nil;
+  try
+    Lines.Add('a **b** c');
+    Blocks := TMarkDownBlockParser.ParseBlocks(Lines);
+    Tokens := TMarkDownBlockParser.ParseInline(Blocks[0].Text, nil,
+      Blocks[0].SourceMap);
+    Assert.AreEqual(3, Tokens.Count);
+    // The bold 'b' sits at offset 4 in "a **b** c".
+    Assert.AreEqual('b', Tokens[1].Text);
+    Assert.IsTrue(fsBold in Tokens[1].Style);
+    Assert.AreEqual(2, Length(Tokens[1].SourceMap));
+    Assert.AreEqual(4, Tokens[1].SourceMap[0]);
+    // The trailing " c": the 'c' is at offset 8.
+    Assert.AreEqual(' c', Tokens[2].Text);
+    Assert.AreEqual(7, Tokens[2].SourceMap[0]);
+    Assert.AreEqual(8, Tokens[2].SourceMap[1]);
+  finally
+    Tokens.Free;
+    Blocks.Free;
+    Lines.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.TokenMapHandlesEntity;
+var
+  Blocks: TMarkDownBlockList;
+  Lines: TStringList;
+  Tokens: TMarkDownInlineList;
+begin
+  Lines := TStringList.Create;
+  Blocks := nil;
+  Tokens := nil;
+  try
+    Lines.Add('&copy; x');
+    Blocks := TMarkDownBlockParser.ParseBlocks(Lines);
+    Tokens := TMarkDownBlockParser.ParseInline(Blocks[0].Text, nil,
+      Blocks[0].SourceMap);
+    Assert.AreEqual(1, Tokens.Count);
+    Assert.AreEqual(#$00A9 + ' x', Tokens[0].Text);
+    // The decoded entity spans &copy; (offsets 0..5); the rendered glyph maps to
+    // the '&' at 0, then the space at 6 and 'x' at 7 follow, end at 8.
+    Assert.AreEqual(4, Length(Tokens[0].SourceMap));
+    Assert.AreEqual(0, Tokens[0].SourceMap[0]);
+    Assert.AreEqual(6, Tokens[0].SourceMap[1]);
+    Assert.AreEqual(7, Tokens[0].SourceMap[2]);
+    Assert.AreEqual(8, Tokens[0].SourceMap[3]);
+  finally
+    Tokens.Free;
+    Blocks.Free;
+    Lines.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.TokenMapHandlesAutoLink;
+var
+  Blocks: TMarkDownBlockList;
+  Lines: TStringList;
+  Tokens: TMarkDownInlineList;
+begin
+  Lines := TStringList.Create;
+  Blocks := nil;
+  Tokens := nil;
+  try
+    Lines.Add('see <https://x.io> ok');
+    Blocks := TMarkDownBlockParser.ParseBlocks(Lines);
+    Tokens := TMarkDownBlockParser.ParseInline(Blocks[0].Text, nil,
+      Blocks[0].SourceMap);
+    Assert.AreEqual(3, Tokens.Count);
+    Assert.AreEqual('https://x.io', Tokens[1].Text);
+    Assert.AreEqual('https://x.io', Tokens[1].Url);
+    // The display text begins just after '<', at offset 5.
+    Assert.AreEqual(Length('https://x.io') + 1, Length(Tokens[1].SourceMap));
+    Assert.AreEqual(5, Tokens[1].SourceMap[0]);
+  finally
+    Tokens.Free;
     Blocks.Free;
     Lines.Free;
   end;

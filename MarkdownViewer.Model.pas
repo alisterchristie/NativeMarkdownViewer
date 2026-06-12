@@ -21,6 +21,11 @@ type
     IsCode: Boolean;
     Url: string;
     LineBreak: Boolean;
+    // Maps each character of Text to its 0-based document offset, with one
+    // trailing entry for the position just past the last character (same shape
+    // as TMarkDownBlock.SourceMap). Empty when the token was parsed without a
+    // block source map, in which case the viewer falls back to its heuristic.
+    SourceMap: TArray<Integer>;
   end;
 
   TMarkDownInlineList = TList<TMarkDownInlineToken>;

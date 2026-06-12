@@ -1797,7 +1797,8 @@ var
   function InlineTokensForBlock(ABlock: TMarkDownBlock): TMarkDownInlineList;
   begin
     if ABlock.InlineTokens = nil then
-      ABlock.InlineTokens := TMarkDownBlockParser.ParseInline(ABlock.Text, FLinkReferences);
+      ABlock.InlineTokens := TMarkDownBlockParser.ParseInline(ABlock.Text,
+        FLinkReferences, ABlock.SourceMap);
     Result := ABlock.InlineTokens;
   end;
 
