@@ -91,6 +91,7 @@ type
     function ConfirmSaveChanges: Boolean;
     procedure EditorWindowProc(var Message: TMessage);
     procedure FindEditKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+    procedure FindEditKeyPress(Sender: TObject; var Key: Char);
     function GetEditorScrollRange(out Position, MaxPosition: Integer): Boolean;
     procedure LoadDocument(const FileName: string);
     procedure SetDocumentText(const Text, FileName: string);
@@ -251,6 +252,7 @@ begin
   SaveDialog.Options := SaveDialog.Options + [ofOverwritePrompt, ofPathMustExist];
   SetDocumentText(SampleMarkdown, '');
   FindEdit.OnKeyDown := FindEditKeyDown;
+  FindEdit.OnKeyPress := FindEditKeyPress;
   FindEdit.Text := 'markdown';
   UpdateInterface;
 end;
@@ -265,6 +267,15 @@ begin
   else
     Viewer.FindNext;
   Key := 0;
+end;
+
+procedure TMainForm.FindEditKeyPress(Sender: TObject; var Key: Char);
+begin
+  // A single-line edit beeps on Enter because there is no default button to
+  // absorb it; OnKeyDown already runs the search, so swallow the character
+  // here (OnKeyDown cannot suppress the translated WM_CHAR) to stop the ding.
+  if CharInSet(Key, [#13, #10]) then
+    Key := #0;
 end;
 
 function TMainForm.GetEditorScrollRange(out Position,
