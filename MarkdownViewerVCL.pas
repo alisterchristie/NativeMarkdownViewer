@@ -25,13 +25,6 @@ type
     FTextRuns: TMarkDownTextRunList;
     FCopyChunks: TMarkDownCopyChunkList;
     FSelectableText: string;
-    // Scratch state shared by the selectable-text builders during a layout
-    // pass (see Paint). FSourceText is the markdown being scanned;
-    // FSourceScanPosition walks it forward; FBlockSourceLimit caps the scan at
-    // the current block so rendered atoms never borrow a later block's source.
-    FSourceText: string;
-    FSourceScanPosition: Integer;
-    FBlockSourceLimit: Integer;
     FScrollPos: Integer;
     FContentHeight: Integer;
     FLastBlockTop: Integer;
@@ -73,9 +66,9 @@ type
     function SelectableOffsetInChunk(const Chunk: TMarkDownCopyChunk;
       SourcePos: Integer): Integer;
     // Selectable-text builders, used while Paint walks the block layout.
-    function FindSourceStart(const AText: string): Integer;
     function SliceMap(const Map: TArray<Integer>;
       Start0, Count: Integer): TArray<Integer>;
+    function SliceMapValue(const Map: TArray<Integer>; Index: Integer): Integer;
     function ResolveChunkSourceMap(const AText: string;
       const AProvided: TArray<Integer>; AHasSource: Boolean): TArray<Integer>;
     procedure AddCopyChunk(TextStart: Integer; const ASourceMap: TArray<Integer>;
@@ -86,7 +79,8 @@ type
     procedure AddSelectableText(const AText: string;
       const AMarkdownText: string = ''; AHasSource: Boolean = True;
       const ASourceMap: TArray<Integer> = nil);
-    procedure AddSelectableBreak(AHasSource: Boolean = True);
+    procedure AddSelectableBreak(AHasSource: Boolean = True;
+      ASourceStart: Integer = -1);
     procedure DrawCaret;
     function SelectionRange(out SelStart, SelEnd: Integer): Boolean;
     procedure DrawSelectionBackground(const AText: string;
@@ -301,16 +295,6 @@ begin
   except
     Result := '';
   end;
-end;
-
-function IsWhitespaceText(const S: string): Boolean;
-var
-  I: Integer;
-begin
-  Result := S <> '';
-  for I := 1 to Length(S) do
-    if not CharInSet(S[I], [' ', #9, #13, #10]) then
-      Exit(False);
 end;
 
 procedure Register;
@@ -1533,63 +1517,9 @@ begin
     end;
 end;
 
-// Locate where a rendered atom came from in the source, advancing the scan
-// forward and never crossing into the next block (see FBlockSourceLimit).
-// Returns -1 when the atom has no literal source (decoded entities, link text).
-function TMarkDownViewer.FindSourceStart(const AText: string): Integer;
-var
-  FoundAt: Integer;
-begin
-  Result := -1;
-  if AText = '' then
-    Exit;
-
-  // Rendered whitespace rarely matches the source exactly: paragraph
-  // lines are joined with a space where the source has a line break,
-  // and syntax such as '**' sits between words. Match any whitespace
-  // run instead of searching for the literal text, otherwise the scan
-  // position jumps into a later line and derails every atom after it.
-  if IsWhitespaceText(AText) then
-  begin
-    FoundAt := FSourceScanPosition;
-    while (FoundAt <= Length(FSourceText)) and
-      not CharInSet(FSourceText[FoundAt], [' ', #9, #13, #10]) do
-      Inc(FoundAt);
-    if FoundAt > Length(FSourceText) then
-      Exit;
-    // Don't let the scan find this block's break in the next block's
-    // source - that derails the source<->selectable mapping (#caret jump).
-    if FoundAt >= FBlockSourceLimit then
-      Exit;
-    Result := FoundAt - 1;
-    // An exact match consumes only itself so consecutive line breaks
-    // (blank lines in code blocks) map one atom per break; otherwise
-    // consume the whole run, e.g. a join space standing in for a CRLF.
-    if Copy(FSourceText, FoundAt, Length(AText)) = AText then
-      FSourceScanPosition := FoundAt + Length(AText)
-    else
-    begin
-      while (FoundAt <= Length(FSourceText)) and
-        CharInSet(FSourceText[FoundAt], [' ', #9, #13, #10]) do
-        Inc(FoundAt);
-      FSourceScanPosition := FoundAt;
-    end;
-    Exit;
-  end;
-
-  FoundAt := PosEx(AText, FSourceText, FSourceScanPosition);
-  // A match in a later block's source means the atom is genuinely absent
-  // here (e.g. a decoded entity or link text); treat it as having no
-  // source rather than borrowing the next block's position.
-  if (FoundAt = 0) or (FoundAt >= FBlockSourceLimit) then
-    Exit;
-  Result := FoundAt - 1;
-  FSourceScanPosition := FoundAt + Length(AText);
-end;
-
 // Returns Map[Start0 .. Start0+Count] (Count+1 entries), or empty when Map is
-// empty or the range falls outside it - so an unmapped token degrades to the
-// heuristic instead of slicing garbage.
+// empty or the range falls outside it - so an unmapped token degrades to no
+// source instead of slicing garbage.
 function TMarkDownViewer.SliceMap(const Map: TArray<Integer>;
   Start0, Count: Integer): TArray<Integer>;
 var
@@ -1603,35 +1533,27 @@ begin
     Result[K] := Map[Start0 + K];
 end;
 
-// Decides a chunk's per-character source map: the exact map handed down from
-// the inline parser when it lines up with the text, otherwise a linear map
-// recovered by the FindSourceStart heuristic (for block kinds not yet mapped),
-// or empty when the text has no source at all.
+// The document offset at Index in Map, or -1 when out of range - the source
+// position of a line break, used when emitting break chunks.
+function TMarkDownViewer.SliceMapValue(const Map: TArray<Integer>;
+  Index: Integer): Integer;
+begin
+  if (Index >= 0) and (Index < Length(Map)) then
+    Result := Map[Index]
+  else
+    Result := -1;
+end;
+
+// A chunk's per-character source map: the exact map the inline parser (or a
+// block/code/table render path) hands down when it lines up with the text,
+// otherwise empty - text with no source, e.g. a wrap-only break.
 function TMarkDownViewer.ResolveChunkSourceMap(const AText: string;
   const AProvided: TArray<Integer>; AHasSource: Boolean): TArray<Integer>;
-var
-  Start: Integer;
-  K: Integer;
 begin
-  if Length(AProvided) = Length(AText) + 1 then
-  begin
-    // An exact map bypasses FindSourceStart, so keep the heuristic scan in step
-    // for any later fallback text (e.g. the trailing line break) by advancing it
-    // past this run's source.
-    if Length(AProvided) > 0 then
-      FSourceScanPosition := Max(FSourceScanPosition,
-        AProvided[High(AProvided)] + 1);
-    Exit(AProvided);
-  end;
-  Result := nil;
-  if not AHasSource then
-    Exit;
-  Start := FindSourceStart(AText);
-  if Start < 0 then
-    Exit;
-  SetLength(Result, Length(AText) + 1);
-  for K := 0 to Length(AText) do
-    Result[K] := Start + K;
+  if AHasSource and (Length(AProvided) = Length(AText) + 1) then
+    Result := AProvided
+  else
+    Result := nil;
 end;
 
 procedure TMarkDownViewer.AddCopyChunk(TextStart: Integer;
@@ -1698,14 +1620,28 @@ begin
     AText, AMarkdownText);
 end;
 
-// AHasSource=False marks breaks that exist only in the rendered layout
-// (word wrap, table cell separators); they must not consume source text
-// or the caret-to-source mapping derails for everything that follows.
-procedure TMarkDownViewer.AddSelectableBreak(AHasSource: Boolean);
+// AHasSource=False marks breaks that exist only in the rendered layout (word
+// wrap, table cell separators) and carry no source. A break between blocks or
+// table rows passes ASourceStart - the document offset of the line break it
+// stands for - so it maps exactly without the FindSourceStart heuristic.
+procedure TMarkDownViewer.AddSelectableBreak(AHasSource: Boolean;
+  ASourceStart: Integer);
+var
+  Map: TArray<Integer>;
+  K: Integer;
 begin
   if FSelectableText = '' then
     Exit;
-  if not EndsText(sLineBreak, FSelectableText) then
+  if EndsText(sLineBreak, FSelectableText) then
+    Exit;
+  if ASourceStart >= 0 then
+  begin
+    SetLength(Map, Length(sLineBreak) + 1);
+    for K := 0 to Length(sLineBreak) do
+      Map[K] := ASourceStart + K;
+    AddSelectableText(sLineBreak, '', True, Map);
+  end
+  else
     AddSelectableText(sLineBreak, '', AHasSource);
 end;
 
@@ -1858,6 +1794,7 @@ var
   Block: TMarkDownBlock;
   Lines: TStringList;
   LineIndex: Integer;
+  CodePos: Integer;
   R: TRect;
   CheckRect: TRect;
   TaskHit: TMarkDownTaskHit;
@@ -2176,6 +2113,9 @@ var
     CellText: string;
     CellRect: TRect;
     CellTokens: TMarkDownInlineList;
+    RowBlockPos: TArray<Integer>;
+    CellSearchCol: Integer;
+    CellCol: Integer;
 
     function MeasureCellHeight(const AText: string; ACellWidth: Integer; AHeader: Boolean): Integer;
     var
@@ -2201,6 +2141,16 @@ var
       SourceLines.Text := TableText;
       if SourceLines.Count < 2 then
         Exit;
+
+      // Document offset of each source row's start within Block.Text, so cells
+      // can be mapped back to the source through Block.SourceMap.
+      SetLength(RowBlockPos, SourceLines.Count);
+      for SourceIndex := 0 to SourceLines.Count - 1 do
+        if SourceIndex = 0 then
+          RowBlockPos[SourceIndex] := 0
+        else
+          RowBlockPos[SourceIndex] := RowBlockPos[SourceIndex - 1] +
+            Length(SourceLines[SourceIndex - 1]) + Length(sLineBreak);
 
       ColCount := 0;
       for SourceIndex := 0 to SourceLines.Count - 1 do
@@ -2267,6 +2217,7 @@ var
 
         RowHeight := RowHeights[SourceIndex];
         X := ALeft;
+        CellSearchCol := 1;
         for Col := 0 to ColCount - 1 do
         begin
           CellRect := Rect(X, RowTop, X + ColWidths[Col], RowTop + RowHeight);
@@ -2285,7 +2236,20 @@ var
           else
             CellText := '';
 
-          CellTokens := TMarkDownBlockParser.ParseInline(CellText, FLinkReferences);
+          // Locate the (trimmed) cell within its source line, advancing a cursor
+          // so repeated cell text still maps to the right column.
+          CellCol := PosEx(CellText, SourceLines[SourceIndex], CellSearchCol);
+          if (CellText <> '') and (CellCol > 0) then
+          begin
+            CellTokens := TMarkDownBlockParser.ParseInline(CellText,
+              FLinkReferences,
+              SliceMap(Block.SourceMap, RowBlockPos[SourceIndex] + CellCol - 1,
+                Length(CellText)));
+            CellSearchCol := CellCol + Length(CellText);
+          end
+          else
+            CellTokens := TMarkDownBlockParser.ParseInline(CellText,
+              FLinkReferences);
           try
             if SourceIndex = 0 then
               DrawInline(CellTokens, CellRect.Left + 8, CellRect.Top + 5,
@@ -2300,7 +2264,8 @@ var
             AddSelectableText(#9, '', False);
           Inc(X, ColWidths[Col]);
         end;
-        AddSelectableBreak;
+        AddSelectableBreak(True, SliceMapValue(Block.SourceMap,
+          RowBlockPos[SourceIndex] + Length(SourceLines[SourceIndex])));
         Inc(RowTop, RowHeight);
       end;
 
@@ -2321,8 +2286,6 @@ begin
   FTextRuns.Clear;
   FCopyChunks.Clear;
   FSelectableText := '';
-  FSourceText := FMarkdown.Text;
-  FSourceScanPosition := 1;
 
   Blocks := FBlocks;
   Y := MarkdownPadding - FScrollPos;
@@ -2336,19 +2299,6 @@ begin
       FLastBlockTop := Y;
     Block := Blocks[I];
     Block.LayoutTop := Y + FScrollPos;
-    // Anchor the source scan to this block's own line and forbid it from
-    // reaching into the next block. The rendered atom -> source search is a
-    // heuristic that derails on lines where the rendered text diverges from
-    // the source (autolinks, reference links, decoded HTML entities);
-    // bounding it per block keeps chunk source offsets monotonic so the
-    // caret round-trip in ChangeHeadingLevel lands on the right line.
-    if (Block.SourceStartLine >= 0) and (Block.SourceStartLine < FMarkdown.Count) then
-      FSourceScanPosition := LineStartSourcePos(Block.SourceStartLine) + 1;
-    if (I + 1 < Blocks.Count) and (Blocks[I + 1].SourceStartLine >= 0) and
-       (Blocks[I + 1].SourceStartLine < FMarkdown.Count) then
-      FBlockSourceLimit := LineStartSourcePos(Blocks[I + 1].SourceStartLine) + 1
-    else
-      FBlockSourceLimit := Length(FSourceText) + 1;
     case Block.Kind of
       bkHeading:
         begin
@@ -2455,6 +2405,7 @@ begin
           Lines := TStringList.Create;
           try
             Lines.Text := Block.Text;
+            CodePos := 0;
             TokenHeight := Max(1, Lines.Count) * LineHeight + 16;
             R := Rect(TextLeft, Y + 2, TextLeft + ContentWidth, Y + TokenHeight);
             CanvasState := TCanvasState.Save(Canvas);
@@ -2468,7 +2419,9 @@ begin
                   Rect(TextLeft + 8, Y + 8 + (LineIndex * LineHeight),
                     TextLeft + 8 + Canvas.TextWidth(Lines[LineIndex]),
                     Y + 8 + (LineIndex * LineHeight) + LineHeight),
-                  Lines[LineIndex], nil);
+                  Lines[LineIndex],
+                  SliceMap(Block.SourceMap, CodePos, Length(Lines[LineIndex])));
+                Inc(CodePos, Length(Lines[LineIndex]));
                 if (Y + 8 + (LineIndex * LineHeight) + LineHeight >= 0) and
                   (Y + 8 + (LineIndex * LineHeight) <= ClientHeight) then
                 begin
@@ -2482,7 +2435,11 @@ begin
                 // Unconditional break so blank code lines survive in the
                 // selectable text (AddSelectableBreak collapses repeats).
                 if LineIndex < Lines.Count - 1 then
-                  AddSelectableText(sLineBreak);
+                begin
+                  AddSelectableText(sLineBreak, '', True,
+                    SliceMap(Block.SourceMap, CodePos, Length(sLineBreak)));
+                  Inc(CodePos, Length(sLineBreak));
+                end;
               end;
               Canvas.Brush.Style := bsSolid;
             finally
@@ -2507,7 +2464,10 @@ begin
     end;
     Block.LayoutHeight := Y + FScrollPos - Block.LayoutTop;
     Block.LayoutWidth := ContentWidth;
-    AddSelectableBreak;
+    // The break after a block maps to the line break following its last source
+    // character (the source map's end sentinel).
+    AddSelectableBreak(True,
+      SliceMapValue(Block.SourceMap, Length(Block.SourceMap) - 1));
   end;
 
   TotalHeight := Y + FScrollPos + MarkdownPadding;
