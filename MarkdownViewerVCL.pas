@@ -98,12 +98,21 @@ type
     procedure ApplyMarkdownLine(ALineIndex: Integer; const ANewLine: string);
     procedure ApplyMarkdownText(const ANewText: string);
     procedure FinishEditAtSource(ASourcePos: Integer);
+    procedure SetCaret(NewPosition: Integer; ExtendSelection: Boolean);
+    procedure CollapseSelectionToEdge(Direction: Integer; ExtendSelection: Boolean);
+    function RunContainingCaret: TMarkDownTextRun;
+    procedure EnsureDesiredCaretX(const ARun: TMarkDownTextRun);
+    function HandleCtrlKey(Key: Word; Shift: TShiftState): Boolean;
+    function HandleEditingKey(Key: Word; Shift: TShiftState): Boolean;
+    function HandleReadOnlyKey(Key: Word; Shift: TShiftState): Boolean;
+    function ThemedColor(AThemedColor, AFallback: TColor): TColor;
     function GetEffectiveBackground: TColor;
     function GetEffectiveTextColor: TColor;
     function GetEffectiveSelectionBackground: TColor;
     function GetEffectiveSelectionTextColor: TColor;
     function GetEffectiveGridlineColor: TColor;
     function GetEffectiveTableHeaderColor: TColor;
+    procedure GetBackgroundChannels(out R, G, B: Integer; out IsLight: Boolean);
     function GetEffectiveCodeBackgroundColor: TColor;
     function GetEffectiveSearchHighlightColor: TColor;
     function GetEffectiveHeadingRuleColor: TColor;
@@ -366,20 +375,24 @@ begin
   Result := TStyleManager.IsCustomStyleActive and (seClient in StyleElements);
 end;
 
-function TMarkDownViewer.GetEffectiveBackground: TColor;
+// When a VCL style is active (and skinning the client) colours come from the
+// style; otherwise fall back to the supplied plain colour.
+function TMarkDownViewer.ThemedColor(AThemedColor, AFallback: TColor): TColor;
 begin
   if UseThemedColors then
-    Result := StyleServices.GetSystemColor(clWindow)
+    Result := StyleServices.GetSystemColor(AThemedColor)
   else
-    Result := Color;
+    Result := AFallback;
+end;
+
+function TMarkDownViewer.GetEffectiveBackground: TColor;
+begin
+  Result := ThemedColor(clWindow, Color);
 end;
 
 function TMarkDownViewer.GetEffectiveTextColor: TColor;
 begin
-  if UseThemedColors then
-    Result := StyleServices.GetSystemColor(clWindowText)
-  else
-    Result := Font.Color;
+  Result := ThemedColor(clWindowText, Font.Color);
 end;
 
 function TMarkDownViewer.GetEffectiveSelectionBackground: TColor;
@@ -400,36 +413,38 @@ end;
 
 function TMarkDownViewer.GetEffectiveGridlineColor: TColor;
 begin
-  if UseThemedColors then
-    Result := StyleServices.GetSystemColor(clBtnShadow)
-  else
-    Result := clSilver;
+  Result := ThemedColor(clBtnShadow, clSilver);
 end;
 
 function TMarkDownViewer.GetEffectiveTableHeaderColor: TColor;
 begin
-  if UseThemedColors then
-    Result := StyleServices.GetSystemColor(clBtnFace)
-  else
-    Result := $00F7F7F7;
+  Result := ThemedColor(clBtnFace, $00F7F7F7);
 end;
 
-function TMarkDownViewer.GetEffectiveCodeBackgroundColor: TColor;
+// Decompose the effective background into 8-bit channels and report whether
+// it reads as light (so derived colours know which way to shift for contrast).
+procedure TMarkDownViewer.GetBackgroundChannels(out R, G, B: Integer;
+  out IsLight: Boolean);
 var
   BaseColor: TColor;
-  R, G, B: Integer;
-  Luminance: Double;
 begin
-  if FCodeBackgroundColor <> clDefault then
-    Exit(FCodeBackgroundColor);
-
   BaseColor := ColorToRGB(GetEffectiveBackground);
   R := GetRValue(BaseColor);
   G := GetGValue(BaseColor);
   B := GetBValue(BaseColor);
-  Luminance := 0.299 * R + 0.587 * G + 0.114 * B;
+  IsLight := (0.299 * R + 0.587 * G + 0.114 * B) > 128;
+end;
 
-  if Luminance > 128 then
+function TMarkDownViewer.GetEffectiveCodeBackgroundColor: TColor;
+var
+  R, G, B: Integer;
+  IsLight: Boolean;
+begin
+  if FCodeBackgroundColor <> clDefault then
+    Exit(FCodeBackgroundColor);
+
+  GetBackgroundChannels(R, G, B, IsLight);
+  if IsLight then
     Result := RGB(Max(0, R - 28), Max(0, G - 28), Max(0, B - 28))
   else
     Result := RGB(Min(255, R + 32), Min(255, G + 32), Min(255, B + 32));
@@ -437,20 +452,14 @@ end;
 
 function TMarkDownViewer.GetEffectiveSearchHighlightColor: TColor;
 var
-  BaseColor: TColor;
   R, G, B: Integer;
-  Luminance: Double;
+  IsLight: Boolean;
 begin
   if FSearchHighlightColor <> clDefault then
     Exit(FSearchHighlightColor);
 
-  BaseColor := ColorToRGB(GetEffectiveBackground);
-  R := GetRValue(BaseColor);
-  G := GetGValue(BaseColor);
-  B := GetBValue(BaseColor);
-  Luminance := 0.299 * R + 0.587 * G + 0.114 * B;
-
-  if Luminance > 128 then
+  GetBackgroundChannels(R, G, B, IsLight);
+  if IsLight then
     Result := RGB(Min(255, R + 20), Min(255, G + 20), Max(0, B - 40))
   else
     Result := RGB(Min(255, R + 64), Min(255, G + 64), Min(255, B + 72));
@@ -498,124 +507,140 @@ begin
   end;
 end;
 
+// Ctrl-modified keys: clipboard, undo/redo, select-all and document-boundary
+// navigation. Returns True when the key was consumed.
+function TMarkDownViewer.HandleCtrlKey(Key: Word; Shift: TShiftState): Boolean;
+begin
+  Result := True;
+  case Key of
+    Ord('A'):
+      SelectAllText;
+    Ord('C'):
+      CopySelectionToClipboard(ssShift in Shift);
+    Ord('V'):
+      if not FReadOnly then
+        InsertTextAtSelection(ReadClipboardText)
+      else
+        Result := False;
+    Ord('X'):
+      if not FReadOnly and HasSelection then
+      begin
+        CopySelectionToClipboard(False);
+        InsertTextAtSelection('');
+      end
+      else
+        Result := False;
+    Ord('Y'):
+      if not FReadOnly then
+        Redo
+      else
+        Result := False;
+    Ord('Z'):
+      if not FReadOnly then
+      begin
+        if ssShift in Shift then
+          Redo
+        else
+          Undo;
+      end
+      else
+        Result := False;
+    VK_INSERT:
+      CopySelectionToClipboard(True);
+    VK_HOME:
+      if not FReadOnly then
+        MoveCaretDocumentBoundary(False, ssShift in Shift)
+      else
+        SetScrollPosition(0);
+    VK_END:
+      if not FReadOnly then
+        MoveCaretDocumentBoundary(True, ssShift in Shift)
+      else
+        SetScrollPosition(FContentHeight);
+  else
+    Result := False;
+  end;
+end;
+
+// Editing keys (when not read-only): caret movement, deletion and Tab heading
+// level changes. Returns True when the key was consumed.
+function TMarkDownViewer.HandleEditingKey(Key: Word; Shift: TShiftState): Boolean;
+begin
+  Result := True;
+  case Key of
+    VK_LEFT:
+      MoveCaret(-1, ssShift in Shift);
+    VK_RIGHT:
+      MoveCaret(1, ssShift in Shift);
+    VK_UP:
+      MoveCaretVertical(-1, ssShift in Shift);
+    VK_DOWN:
+      MoveCaretVertical(1, ssShift in Shift);
+    VK_HOME:
+      MoveCaretLineBoundary(False, ssShift in Shift);
+    VK_END:
+      MoveCaretLineBoundary(True, ssShift in Shift);
+    VK_PRIOR:
+      MoveCaretPage(-1, ssShift in Shift);
+    VK_NEXT:
+      MoveCaretPage(1, ssShift in Shift);
+    VK_BACK:
+      DeleteSelectionOrCharacter(True);
+    VK_DELETE:
+      DeleteSelectionOrCharacter(False);
+    VK_ESCAPE:
+      ClearSelection;
+    VK_TAB:
+      if ssShift in Shift then
+        ChangeHeadingLevel(-1)
+      else
+        ChangeHeadingLevel(1);
+  else
+    Result := False;
+  end;
+end;
+
+// Read-only keys: scrolling only. Returns True when the key was consumed.
+function TMarkDownViewer.HandleReadOnlyKey(Key: Word; Shift: TShiftState): Boolean;
+begin
+  Result := True;
+  case Key of
+    VK_UP:
+      SetScrollPosition(FScrollPos - 24);
+    VK_DOWN:
+      SetScrollPosition(FScrollPos + 24);
+    VK_PRIOR:
+      SetScrollPosition(FScrollPos - ClientHeight);
+    VK_NEXT:
+      SetScrollPosition(FScrollPos + ClientHeight);
+    VK_HOME:
+      SetScrollPosition(0);
+    VK_END:
+      SetScrollPosition(FContentHeight);
+    VK_ESCAPE:
+      ClearSelection;
+    VK_SPACE:
+      if ssShift in Shift then
+        SetScrollPosition(FScrollPos - ClientHeight)
+      else
+        SetScrollPosition(FScrollPos + ClientHeight);
+  else
+    Result := False;
+  end;
+end;
+
 procedure TMarkDownViewer.KeyDown(var Key: Word; Shift: TShiftState);
 var
   Handled: Boolean;
 begin
   inherited KeyDown(Key, Shift);
-  Handled := True;
 
   if ssCtrl in Shift then
-  begin
-    case Key of
-      Ord('A'):
-        SelectAllText;
-      Ord('C'):
-        CopySelectionToClipboard(ssShift in Shift);
-      Ord('V'):
-        if not FReadOnly then
-          InsertTextAtSelection(ReadClipboardText)
-        else
-          Handled := False;
-      Ord('X'):
-        if not FReadOnly and HasSelection then
-        begin
-          CopySelectionToClipboard(False);
-          InsertTextAtSelection('');
-        end
-        else
-          Handled := False;
-      Ord('Y'):
-        if not FReadOnly then
-          Redo
-        else
-          Handled := False;
-      Ord('Z'):
-        if not FReadOnly then
-        begin
-          if ssShift in Shift then
-            Redo
-          else
-            Undo;
-        end
-        else
-          Handled := False;
-      VK_INSERT:
-        CopySelectionToClipboard(True);
-      VK_HOME:
-        if not FReadOnly then
-          MoveCaretDocumentBoundary(False, ssShift in Shift)
-        else
-          SetScrollPosition(0);
-      VK_END:
-        if not FReadOnly then
-          MoveCaretDocumentBoundary(True, ssShift in Shift)
-        else
-          SetScrollPosition(FContentHeight);
-    else
-      Handled := False;
-    end;
-  end
+    Handled := HandleCtrlKey(Key, Shift)
   else if not FReadOnly then
-  begin
-    case Key of
-      VK_LEFT:
-        MoveCaret(-1, ssShift in Shift);
-      VK_RIGHT:
-        MoveCaret(1, ssShift in Shift);
-      VK_UP:
-        MoveCaretVertical(-1, ssShift in Shift);
-      VK_DOWN:
-        MoveCaretVertical(1, ssShift in Shift);
-      VK_HOME:
-        MoveCaretLineBoundary(False, ssShift in Shift);
-      VK_END:
-        MoveCaretLineBoundary(True, ssShift in Shift);
-      VK_PRIOR:
-        MoveCaretPage(-1, ssShift in Shift);
-      VK_NEXT:
-        MoveCaretPage(1, ssShift in Shift);
-      VK_BACK:
-        DeleteSelectionOrCharacter(True);
-      VK_DELETE:
-        DeleteSelectionOrCharacter(False);
-      VK_ESCAPE:
-        ClearSelection;
-      VK_TAB:
-        if ssShift in Shift then
-          ChangeHeadingLevel(-1)
-        else
-          ChangeHeadingLevel(1);
-    else
-      Handled := False;
-    end;
-  end
+    Handled := HandleEditingKey(Key, Shift)
   else
-  begin
-    case Key of
-      VK_UP:
-        SetScrollPosition(FScrollPos - 24);
-      VK_DOWN:
-        SetScrollPosition(FScrollPos + 24);
-      VK_PRIOR:
-        SetScrollPosition(FScrollPos - ClientHeight);
-      VK_NEXT:
-        SetScrollPosition(FScrollPos + ClientHeight);
-      VK_HOME:
-        SetScrollPosition(0);
-      VK_END:
-        SetScrollPosition(FContentHeight);
-      VK_ESCAPE:
-        ClearSelection;
-      VK_SPACE:
-        if ssShift in Shift then
-          SetScrollPosition(FScrollPos - ClientHeight)
-        else
-          SetScrollPosition(FScrollPos + ClientHeight);
-    else
-      Handled := False;
-    end;
-  end;
+    Handled := HandleReadOnlyKey(Key, Shift);
 
   if Handled then
     Key := 0;
@@ -934,6 +959,69 @@ begin
   FinishEditAtSource(NewSourceCaret);
 end;
 
+// Move the caret to NewPosition, dragging the selection anchor with it unless
+// the selection is being extended.
+procedure TMarkDownViewer.SetCaret(NewPosition: Integer;
+  ExtendSelection: Boolean);
+begin
+  FSelectionCaret := NewPosition;
+  if not ExtendSelection then
+    FSelectionAnchor := NewPosition;
+end;
+
+// Before a plain (non-extending) vertical/page move, drop an existing
+// selection onto the edge the caret is moving away from.
+procedure TMarkDownViewer.CollapseSelectionToEdge(Direction: Integer;
+  ExtendSelection: Boolean);
+begin
+  if ExtendSelection or not HasSelection then
+    Exit;
+  if Direction < 0 then
+    FSelectionCaret := Min(FSelectionAnchor, FSelectionCaret)
+  else
+    FSelectionCaret := Max(FSelectionAnchor, FSelectionCaret);
+  FSelectionAnchor := FSelectionCaret;
+end;
+
+// The text run the caret currently sits in, preferring the run that starts at
+// the caret when it lands on a boundary. Callers must have at least one run.
+function TMarkDownViewer.RunContainingCaret: TMarkDownTextRun;
+var
+  I: Integer;
+  Run: TMarkDownTextRun;
+begin
+  Result := FTextRuns.Last;
+  for I := 0 to FTextRuns.Count - 1 do
+  begin
+    Run := FTextRuns[I];
+    if (FSelectionCaret >= Run.StartIndex) and
+      (FSelectionCaret <= Run.StartIndex + Length(Run.Text)) then
+    begin
+      Result := Run;
+      if FSelectionCaret = Run.StartIndex then
+        Break;
+    end;
+  end;
+end;
+
+// Lock in the pixel column the caret should track across vertical moves, based
+// on its position within ARun. No-op once a desired column is already set.
+procedure TMarkDownViewer.EnsureDesiredCaretX(const ARun: TMarkDownTextRun);
+var
+  LocalPosition: Integer;
+begin
+  if FDesiredCaretX >= 0 then
+    Exit;
+  Canvas.Font.Assign(Font);
+  Canvas.Font.Name := ARun.FontName;
+  Canvas.Font.Size := ARun.FontSize;
+  Canvas.Font.Style := ARun.FontStyle;
+  LocalPosition := EnsureRange(FSelectionCaret - ARun.StartIndex,
+    0, Length(ARun.Text));
+  FDesiredCaretX := ARun.Rect.Left +
+    Canvas.TextWidth(Copy(ARun.Text, 1, LocalPosition));
+end;
+
 procedure TMarkDownViewer.MoveCaret(Delta: Integer; ExtendSelection: Boolean);
 var
   NewPosition: Integer;
@@ -961,9 +1049,7 @@ begin
       Inc(NewPosition);
   end;
 
-  FSelectionCaret := NewPosition;
-  if not ExtendSelection then
-    FSelectionAnchor := NewPosition;
+  SetCaret(NewPosition, ExtendSelection);
   FDesiredCaretX := -1;
   ScrollCaretIntoView;
   Invalidate;
@@ -987,9 +1073,7 @@ begin
   else
     NewPosition := 0;
 
-  FSelectionCaret := NewPosition;
-  if not ExtendSelection then
-    FSelectionAnchor := NewPosition;
+  SetCaret(NewPosition, ExtendSelection);
   FDesiredCaretX := -1;
   if ToEnd then
     SetScrollPosition(FContentHeight)
@@ -1004,25 +1088,13 @@ var
   CurrentTop: Integer;
   I: Integer;
   NewPosition: Integer;
-  Run: TMarkDownTextRun;
 begin
   if FSelectableText = '' then
     Repaint;
   if FTextRuns.Count = 0 then
     Exit;
 
-  CurrentRun := FTextRuns.Last;
-  for I := 0 to FTextRuns.Count - 1 do
-  begin
-    Run := FTextRuns[I];
-    if (FSelectionCaret >= Run.StartIndex) and
-      (FSelectionCaret <= Run.StartIndex + Length(Run.Text)) then
-    begin
-      CurrentRun := Run;
-      if FSelectionCaret = Run.StartIndex then
-        Break;
-    end;
-  end;
+  CurrentRun := RunContainingCaret;
 
   CurrentTop := CurrentRun.Rect.Top;
   if ToEnd then
@@ -1041,9 +1113,7 @@ begin
         NewPosition := Min(NewPosition, FTextRuns[I].StartIndex);
   end;
 
-  FSelectionCaret := NewPosition;
-  if not ExtendSelection then
-    FSelectionAnchor := NewPosition;
+  SetCaret(NewPosition, ExtendSelection);
   FDesiredCaretX := -1;
   Invalidate;
 end;
@@ -1055,7 +1125,6 @@ var
   CurrentTop: Integer;
   DesiredTop: Integer;
   I: Integer;
-  LocalPosition: Integer;
   NewPosition: Integer;
   Run: TMarkDownTextRun;
   TargetBottom: Integer;
@@ -1067,39 +1136,11 @@ begin
   if FTextRuns.Count = 0 then
     Exit;
 
-  if not ExtendSelection and HasSelection then
-  begin
-    if Direction < 0 then
-      FSelectionCaret := Min(FSelectionAnchor, FSelectionCaret)
-    else
-      FSelectionCaret := Max(FSelectionAnchor, FSelectionCaret);
-    FSelectionAnchor := FSelectionCaret;
-  end;
+  CollapseSelectionToEdge(Direction, ExtendSelection);
 
-  CurrentRun := FTextRuns.Last;
-  for I := 0 to FTextRuns.Count - 1 do
-  begin
-    Run := FTextRuns[I];
-    if (FSelectionCaret >= Run.StartIndex) and
-      (FSelectionCaret <= Run.StartIndex + Length(Run.Text)) then
-    begin
-      CurrentRun := Run;
-      if FSelectionCaret = Run.StartIndex then
-        Break;
-    end;
-  end;
+  CurrentRun := RunContainingCaret;
 
-  if FDesiredCaretX < 0 then
-  begin
-    Canvas.Font.Assign(Font);
-    Canvas.Font.Name := CurrentRun.FontName;
-    Canvas.Font.Size := CurrentRun.FontSize;
-    Canvas.Font.Style := CurrentRun.FontStyle;
-    LocalPosition := EnsureRange(FSelectionCaret - CurrentRun.StartIndex,
-      0, Length(CurrentRun.Text));
-    FDesiredCaretX := CurrentRun.Rect.Left +
-      Canvas.TextWidth(Copy(CurrentRun.Text, 1, LocalPosition));
-  end;
+  EnsureDesiredCaretX(CurrentRun);
 
   CurrentTop := CurrentRun.Rect.Top;
   DesiredTop := CurrentTop + (Direction * Max(1, ClientHeight -
@@ -1128,9 +1169,7 @@ begin
   NewPosition := HitTestTextPosition(FDesiredCaretX,
     TargetTop + ((TargetBottom - TargetTop) div 2));
 
-  FSelectionCaret := NewPosition;
-  if not ExtendSelection then
-    FSelectionAnchor := NewPosition;
+  SetCaret(NewPosition, ExtendSelection);
   SetScrollPosition(FScrollPos + TargetTop - CurrentTop);
 end;
 
@@ -1140,7 +1179,6 @@ var
   CurrentRun: TMarkDownTextRun;
   CurrentTop: Integer;
   I: Integer;
-  LocalPosition: Integer;
   NewPosition: Integer;
   Run: TMarkDownTextRun;
   TargetBottom: Integer;
@@ -1152,14 +1190,7 @@ begin
   if FTextRuns.Count = 0 then
     Exit;
 
-  if not ExtendSelection and HasSelection then
-  begin
-    if Direction < 0 then
-      FSelectionCaret := Min(FSelectionAnchor, FSelectionCaret)
-    else
-      FSelectionCaret := Max(FSelectionAnchor, FSelectionCaret);
-    FSelectionAnchor := FSelectionCaret;
-  end;
+  CollapseSelectionToEdge(Direction, ExtendSelection);
 
   CurrentRun := FTextRuns.Last;
   for I := 0 to FTextRuns.Count - 1 do
@@ -1172,17 +1203,7 @@ begin
     end;
   end;
 
-  if FDesiredCaretX < 0 then
-  begin
-    Canvas.Font.Assign(Font);
-    Canvas.Font.Name := CurrentRun.FontName;
-    Canvas.Font.Size := CurrentRun.FontSize;
-    Canvas.Font.Style := CurrentRun.FontStyle;
-    LocalPosition := EnsureRange(FSelectionCaret - CurrentRun.StartIndex,
-      0, Length(CurrentRun.Text));
-    FDesiredCaretX := CurrentRun.Rect.Left +
-      Canvas.TextWidth(Copy(CurrentRun.Text, 1, LocalPosition));
-  end;
+  EnsureDesiredCaretX(CurrentRun);
 
   CurrentTop := CurrentRun.Rect.Top;
   if Direction < 0 then
@@ -1213,9 +1234,7 @@ begin
   TargetY := TargetTop + ((TargetBottom - TargetTop) div 2);
   NewPosition := HitTestTextPosition(FDesiredCaretX, TargetY);
 
-  FSelectionCaret := NewPosition;
-  if not ExtendSelection then
-    FSelectionAnchor := NewPosition;
+  SetCaret(NewPosition, ExtendSelection);
 
   if TargetTop < 0 then
     SetScrollPosition(FScrollPos + TargetTop - MarkdownPadding)
