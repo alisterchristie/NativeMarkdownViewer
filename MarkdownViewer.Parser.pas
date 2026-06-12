@@ -34,6 +34,10 @@ type
       out ReferenceName, Url: string): Boolean; static;
     class function TryParseListItem(const Line: string; out Text: string;
       out Ordered: Boolean; out Number, IndentLevel: Integer): Boolean; static;
+    // Fills each block's SourceMap (Text character -> document offset). Public
+    // so it can be exercised directly by tests.
+    class procedure AssignSourceMaps(Blocks: TMarkDownBlockList;
+      Lines: TStrings); static;
   private
     class function IsTableAlignCell(const Cell: string): Boolean; static;
     class function IsTableSeparator(const Line: string): Boolean; static;
@@ -43,6 +47,7 @@ implementation
 
 uses
   System.Character,
+  System.Generics.Collections,
   System.Math,
   System.StrUtils,
   System.SysUtils,
@@ -579,6 +584,198 @@ begin
   end;
 
   CommitParagraph;
+  AssignSourceMaps(Result, Lines);
+end;
+
+// Reconstructs each block's text from its source lines using the same cleaning
+// the assembly above applied, recording the document offset of every character
+// so the viewer can map rendered text back to the source without guessing.
+// Only the kinds handled here get a map; the rest are left empty and the caller
+// falls back to its heuristic for them.
+class procedure TMarkDownBlockParser.AssignSourceMaps(
+  Blocks: TMarkDownBlockList; Lines: TStrings);
+var
+  LineBase: TArray<Integer>;
+  BlockIndex: Integer;
+  Block: TMarkDownBlock;
+
+  function LeadingWs(const S: string): Integer;
+  begin
+    Result := 0;
+    while (Result < Length(S)) and CharInSet(S[Result + 1], [' ', #9]) do
+      Inc(Result);
+  end;
+
+  // Append the contiguous slice Lines[LineIdx][FromCol .. FromCol+Count-1].
+  procedure AddSlice(Map: TList<Integer>; LineIdx, FromCol, Count: Integer);
+  var
+    D: Integer;
+  begin
+    for D := 0 to Count - 1 do
+      Map.Add(LineBase[LineIdx] + (FromCol - 1) + D);
+  end;
+
+  // Append one synthetic separator character mapped to the line break that
+  // follows LineIdx (the position of the CR after the line's last character).
+  procedure AddJoin(Map: TList<Integer>; LineIdx: Integer);
+  begin
+    Map.Add(LineBase[LineIdx] + Length(Lines[LineIdx]));
+  end;
+
+  // Walk consecutive paragraph lines from StartLine, appending each line's
+  // trimmed text joined by a space (or a newline after a hard break), until the
+  // reconstruction equals Block.Text. Used for paragraphs and setext headings.
+  procedure MapParagraph(ABlock: TMarkDownBlock; Map: TList<Integer>);
+  var
+    LineIdx: Integer;
+    PrevLineIdx: Integer;
+    Para: string;
+    Text: string;
+    HardBreak: Boolean;
+    PrevHardBreak: Boolean;
+    First: Boolean;
+  begin
+    LineIdx := ABlock.SourceStartLine;
+    PrevLineIdx := LineIdx;
+    PrevHardBreak := False;
+    First := True;
+    Text := '';
+    while (LineIdx < Lines.Count) and (Trim(Lines[LineIdx]) <> '') do
+    begin
+      Para := ParagraphLineText(Lines[LineIdx], HardBreak);
+      if not First then
+      begin
+        AddJoin(Map, PrevLineIdx);
+        if PrevHardBreak then
+          Text := Text + #10
+        else
+          Text := Text + ' ';
+      end;
+      AddSlice(Map, LineIdx, LeadingWs(Lines[LineIdx]) + 1, Length(Para));
+      Text := Text + Para;
+      PrevHardBreak := HardBreak;
+      PrevLineIdx := LineIdx;
+      First := False;
+      Inc(LineIdx);
+      if Text = ABlock.Text then
+        Break;
+    end;
+  end;
+
+  procedure MapAtxHeading(ABlock: TMarkDownBlock; Map: TList<Integer>);
+  var
+    Line: string;
+    T: string;
+    LeadingInLine: Integer;
+    ContentTPos: Integer;
+  begin
+    Line := Lines[ABlock.SourceStartLine];
+    LeadingInLine := LeadingWs(Line);
+    T := TrimLeftOnly(Line);
+    // T[Level+1] is the required space after the hashes; content follows it,
+    // with any further leading whitespace trimmed off.
+    ContentTPos := (ABlock.Level + 2) + LeadingWs(Copy(T, ABlock.Level + 2, MaxInt));
+    AddSlice(Map, ABlock.SourceStartLine, LeadingInLine + ContentTPos,
+      Length(ABlock.Text));
+  end;
+
+  procedure MapQuote(ABlock: TMarkDownBlock; Map: TList<Integer>);
+  var
+    LineIdx: Integer;
+    PrevLineIdx: Integer;
+    T: string;
+    Content: string;
+    FromCol: Integer;
+    Text: string;
+    First: Boolean;
+  begin
+    LineIdx := ABlock.SourceStartLine;
+    PrevLineIdx := LineIdx;
+    First := True;
+    Text := '';
+    while (LineIdx < Lines.Count) and
+      (Copy(TrimLeftOnly(Lines[LineIdx]), 1, 1) = '>') do
+    begin
+      T := TrimLeftOnly(Lines[LineIdx]);
+      Content := Trim(Copy(T, 2, MaxInt));
+      // Line column of the content: leading ws + the '>' + ws trimmed after it.
+      FromCol := LeadingWs(Lines[LineIdx]) + 2 + LeadingWs(Copy(T, 2, MaxInt));
+      if not First then
+      begin
+        AddJoin(Map, PrevLineIdx);
+        Text := Text + ' ';
+      end;
+      AddSlice(Map, LineIdx, FromCol, Length(Content));
+      Text := Text + Content;
+      PrevLineIdx := LineIdx;
+      First := False;
+      Inc(LineIdx);
+      if Text = ABlock.Text then
+        Break;
+    end;
+  end;
+
+  function IsAtxHeading(ABlock: TMarkDownBlock): Boolean;
+  var
+    DummyText: string;
+    DummyLevel: Integer;
+  begin
+    Result := (ABlock.SourceStartLine >= 0) and
+      (ABlock.SourceStartLine < Lines.Count) and
+      TryParseHeading(Lines[ABlock.SourceStartLine], DummyText, DummyLevel);
+  end;
+
+var
+  Map: TList<Integer>;
+  Acc: Integer;
+  I: Integer;
+begin
+  SetLength(LineBase, Lines.Count + 1);
+  Acc := 0;
+  for I := 0 to Lines.Count - 1 do
+  begin
+    LineBase[I] := Acc;
+    Inc(Acc, Length(Lines[I]) + 2);
+  end;
+  LineBase[Lines.Count] := Acc;
+
+  for BlockIndex := 0 to Blocks.Count - 1 do
+  begin
+    Block := Blocks[BlockIndex];
+    if (Block.SourceStartLine < 0) or (Block.SourceStartLine >= Lines.Count) or
+      (Block.Text = '') then
+      Continue;
+
+    Map := TList<Integer>.Create;
+    try
+      case Block.Kind of
+        bkParagraph:
+          MapParagraph(Block, Map);
+        bkHeading:
+          if IsAtxHeading(Block) then
+            MapAtxHeading(Block, Map)
+          else
+            MapParagraph(Block, Map);
+        bkQuote:
+          MapQuote(Block, Map);
+      else
+        Continue; // other kinds keep the heuristic for now
+      end;
+
+      // Only trust a map that accounts for every character of Text; otherwise
+      // leave it empty so the caller falls back rather than mis-mapping.
+      if Map.Count = Length(Block.Text) then
+      begin
+        if Map.Count > 0 then
+          Map.Add(Map[Map.Count - 1] + 1)
+        else
+          Map.Add(LineBase[Block.SourceStartLine]);
+        Block.SourceMap := Map.ToArray;
+      end;
+    finally
+      Map.Free;
+    end;
+  end;
 end;
 
 procedure AddRun(Tokens: TMarkDownInlineList; const Text: string;

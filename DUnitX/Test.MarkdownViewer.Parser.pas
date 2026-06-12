@@ -107,6 +107,20 @@ type
     procedure TryParseListItemHandlesBulletsAndNumbers;
     [Test]
     procedure TryParseListItemRejectsPlainText;
+    [Test]
+    procedure SourceMapMapsParagraphToSource;
+    [Test]
+    procedure SourceMapHandlesMultiLineParagraphJoin;
+    [Test]
+    procedure SourceMapHandlesHardBreakParagraph;
+    [Test]
+    procedure SourceMapHandlesAtxHeadingOffset;
+    [Test]
+    procedure SourceMapHandlesMarkupAndEntities;
+    [Test]
+    procedure SourceMapHandlesQuoteAcrossLines;
+    [Test]
+    procedure SourceMapHandlesIndentedHeading;
   end;
 
 implementation
@@ -889,6 +903,177 @@ var
 begin
   Assert.IsFalse(TMarkDownBlockParser.TryParseListItem('plain text', Text,
     Ordered, Number, IndentLevel));
+end;
+
+// Verifies the invariant that every character of Block.Text maps to a document
+// offset holding the same character - except the synthetic spaces/newlines that
+// join wrapped source lines, which map to the CR of the line break they stand
+// for. Also checks the map has the expected length and trailing sentinel.
+procedure AssertSourceMapValid(Lines: TStringList; Block: TMarkDownBlock);
+var
+  Doc: string;
+  I: Integer;
+  Off: Integer;
+  SrcCh: Char;
+  BlkCh: Char;
+begin
+  Doc := Lines.Text;
+  Assert.AreEqual(Length(Block.Text) + 1, Length(Block.SourceMap),
+    'map length for "' + Block.Text + '"');
+  for I := 0 to Length(Block.Text) - 1 do
+  begin
+    Off := Block.SourceMap[I];
+    Assert.IsTrue((Off >= 0) and (Off < Length(Doc)),
+      Format('offset %d out of range at index %d', [Off, I]));
+    SrcCh := Doc[Off + 1];
+    BlkCh := Block.Text[I + 1];
+    if CharInSet(BlkCh, [' ', #10]) then
+      Assert.IsTrue((SrcCh = BlkCh) or (SrcCh = #13),
+        Format('join at index %d maps to offset %d (ord %d)',
+          [I, Off, Ord(SrcCh)]))
+    else
+      Assert.AreEqual(BlkCh, SrcCh,
+        Format('index %d "%s" maps to offset %d "%s"', [I, BlkCh, Off, SrcCh]));
+  end;
+end;
+
+procedure TMarkDownParserTests.SourceMapMapsParagraphToSource;
+var
+  Blocks: TMarkDownBlockList;
+  Lines: TStringList;
+begin
+  Lines := TStringList.Create;
+  Blocks := nil;
+  try
+    Lines.Add('Hello world');
+    Blocks := TMarkDownBlockParser.ParseBlocks(Lines);
+    AssertSourceMapValid(Lines, Blocks[0]);
+    Assert.AreEqual(0, Blocks[0].SourceMap[0]);
+  finally
+    Blocks.Free;
+    Lines.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.SourceMapHandlesMultiLineParagraphJoin;
+var
+  Blocks: TMarkDownBlockList;
+  Lines: TStringList;
+begin
+  Lines := TStringList.Create;
+  Blocks := nil;
+  try
+    Lines.Add('alpha bravo');
+    Lines.Add('charlie');
+    Blocks := TMarkDownBlockParser.ParseBlocks(Lines);
+    Assert.AreEqual('alpha bravo charlie', Blocks[0].Text);
+    AssertSourceMapValid(Lines, Blocks[0]);
+    // 'charlie' begins at the start of the second source line.
+    Assert.AreEqual(Length('alpha bravo') + 2,
+      Blocks[0].SourceMap[Length('alpha bravo ')]);
+  finally
+    Blocks.Free;
+    Lines.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.SourceMapHandlesHardBreakParagraph;
+var
+  Blocks: TMarkDownBlockList;
+  Lines: TStringList;
+begin
+  Lines := TStringList.Create;
+  Blocks := nil;
+  try
+    Lines.Add('alpha  ');
+    Lines.Add('bravo');
+    Blocks := TMarkDownBlockParser.ParseBlocks(Lines);
+    Assert.AreEqual('alpha'#10'bravo', Blocks[0].Text);
+    AssertSourceMapValid(Lines, Blocks[0]);
+  finally
+    Blocks.Free;
+    Lines.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.SourceMapHandlesAtxHeadingOffset;
+var
+  Blocks: TMarkDownBlockList;
+  Lines: TStringList;
+begin
+  Lines := TStringList.Create;
+  Blocks := nil;
+  try
+    Lines.Add('## Heading');
+    Blocks := TMarkDownBlockParser.ParseBlocks(Lines);
+    Assert.AreEqual('Heading', Blocks[0].Text);
+    AssertSourceMapValid(Lines, Blocks[0]);
+    Assert.AreEqual(3, Blocks[0].SourceMap[0]);
+  finally
+    Blocks.Free;
+    Lines.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.SourceMapHandlesMarkupAndEntities;
+var
+  Blocks: TMarkDownBlockList;
+  Lines: TStringList;
+  I: Integer;
+begin
+  Lines := TStringList.Create;
+  Blocks := nil;
+  try
+    // A single-line paragraph is identical to its source, so each character
+    // must map to its own offset - including markup and entity characters.
+    Lines.Add('Text **bold** and &copy; end');
+    Blocks := TMarkDownBlockParser.ParseBlocks(Lines);
+    AssertSourceMapValid(Lines, Blocks[0]);
+    for I := 0 to Length(Blocks[0].Text) - 1 do
+      Assert.AreEqual(I, Blocks[0].SourceMap[I]);
+  finally
+    Blocks.Free;
+    Lines.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.SourceMapHandlesQuoteAcrossLines;
+var
+  Blocks: TMarkDownBlockList;
+  Lines: TStringList;
+begin
+  Lines := TStringList.Create;
+  Blocks := nil;
+  try
+    Lines.Add('> alpha');
+    Lines.Add('> bravo');
+    Blocks := TMarkDownBlockParser.ParseBlocks(Lines);
+    Assert.AreEqual('alpha bravo', Blocks[0].Text);
+    AssertSourceMapValid(Lines, Blocks[0]);
+    Assert.AreEqual(2, Blocks[0].SourceMap[0]);
+  finally
+    Blocks.Free;
+    Lines.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.SourceMapHandlesIndentedHeading;
+var
+  Blocks: TMarkDownBlockList;
+  Lines: TStringList;
+begin
+  Lines := TStringList.Create;
+  Blocks := nil;
+  try
+    Lines.Add('   ### Deep');
+    Blocks := TMarkDownBlockParser.ParseBlocks(Lines);
+    Assert.AreEqual('Deep', Blocks[0].Text);
+    AssertSourceMapValid(Lines, Blocks[0]);
+    Assert.AreEqual(7, Blocks[0].SourceMap[0]);
+  finally
+    Blocks.Free;
+    Lines.Free;
+  end;
 end;
 
 initialization
