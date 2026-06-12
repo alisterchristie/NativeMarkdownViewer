@@ -3,7 +3,7 @@ object MainForm: TMainForm
   Top = 0
   Caption = 'TMarkDownViewer Demo'
   ClientHeight = 636
-  ClientWidth = 928
+  ClientWidth = 1092
   Color = clBtnFace
   Font.Charset = DEFAULT_CHARSET
   Font.Color = clWindowText
@@ -33,20 +33,19 @@ object MainForm: TMainForm
     TabOrder = 0
     WordWrap = False
     OnChange = EditorChanged
-    ExplicitHeight = 585
   end
   object FindPanel: TPanel
     Left = 0
     Top = 0
-    Width = 928
+    Width = 1092
     Height = 34
     Align = alTop
     BevelOuter = bvNone
     ShowCaption = False
     TabOrder = 2
-    ExplicitWidth = 964
+    ExplicitWidth = 928
     DesignSize = (
-      928
+      1092
       34)
     object FindLabel: TLabel
       Left = 214
@@ -85,15 +84,15 @@ object MainForm: TMainForm
     object FindEdit: TEdit
       Left = 252
       Top = 5
-      Width = 224
+      Width = 388
       Height = 23
       Anchors = [akLeft, akTop, akRight]
       TabOrder = 3
       OnChange = FindChanged
-      ExplicitWidth = 260
+      ExplicitWidth = 224
     end
     object ClearFindButton: TButton
-      Left = 482
+      Left = 646
       Top = 4
       Width = 58
       Height = 25
@@ -101,15 +100,17 @@ object MainForm: TMainForm
       Caption = 'Clear'
       TabOrder = 4
       OnClick = ClearFindClick
-      ExplicitLeft = 518
+      ExplicitLeft = 482
     end
   end
   object Viewer: TMarkDownViewer
     Left = 396
     Top = 34
-    Width = 532
+    Width = 511
     Height = 580
     Align = alClient
+    CodeFontName = 'Consolas'
+    HeadingRuleColor = clNone
     ReadOnly = False
     Font.Charset = DEFAULT_CHARSET
     Font.Color = clWindowText
@@ -122,18 +123,50 @@ object MainForm: TMainForm
     OnChange = ViewerChanged
     OnLinkClick = LinkClicked
     OnScroll = SyncEditorToViewer
-    ExplicitWidth = 568
-    ExplicitHeight = 585
+    ExplicitWidth = 532
   end
   object StatusBar: TStatusBar
     Left = 0
     Top = 614
-    Width = 928
+    Width = 1092
     Height = 22
     Panels = <>
     SimplePanel = True
-    ExplicitTop = 619
-    ExplicitWidth = 964
+    ExplicitWidth = 928
+  end
+  object pnlOptions: TPanel
+    Left = 907
+    Top = 34
+    Width = 185
+    Height = 580
+    Align = alRight
+    Caption = 'pnlProperties'
+    ShowCaption = False
+    TabOrder = 4
+    ExplicitTop = 28
+    object lblHeadingColor: TLabel
+      AlignWithMargins = True
+      Left = 4
+      Top = 4
+      Width = 177
+      Height = 15
+      Align = alTop
+      Caption = 'Heading Rule Color'
+      ExplicitWidth = 103
+    end
+    object cbbHeadingRuleColor: TColorBox
+      AlignWithMargins = True
+      Left = 4
+      Top = 25
+      Width = 177
+      Height = 22
+      Align = alTop
+      TabOrder = 0
+      OnChange = cbbHeadingRuleColorChange
+      ExplicitLeft = 6
+      ExplicitTop = 120
+      ExplicitWidth = 145
+    end
   end
   object MainMenu: TMainMenu
     Left = 816

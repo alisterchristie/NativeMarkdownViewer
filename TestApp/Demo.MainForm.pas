@@ -55,6 +55,10 @@ type
     ClearFindButton: TButton;
     Splitter: TSplitter;
     Viewer: TMarkDownViewer;
+    pnlOptions: TPanel;
+    lblHeadingColor: TLabel;
+    cbbHeadingRuleColor: TColorBox;
+    procedure cbbHeadingRuleColorChange(Sender: TObject);
     procedure ClearFindClick(Sender: TObject);
     procedure CopyClick(Sender: TObject);
     procedure CutClick(Sender: TObject);
@@ -212,6 +216,11 @@ begin
   inherited Destroy;
 end;
 
+procedure TMainForm.cbbHeadingRuleColorChange(Sender: TObject);
+begin
+  Viewer.HeadingRuleColor := cbbHeadingRuleColor.Selected;
+end;
+
 procedure TMainForm.EditorChanged(Sender: TObject);
 begin
   if FLoading then
@@ -254,6 +263,7 @@ begin
   FindEdit.OnKeyDown := FindEditKeyDown;
   FindEdit.OnKeyPress := FindEditKeyPress;
   FindEdit.Text := 'markdown';
+  cbbHeadingRuleColor.Selected := Viewer.HeadingRuleColor;
   UpdateInterface;
 end;
 
