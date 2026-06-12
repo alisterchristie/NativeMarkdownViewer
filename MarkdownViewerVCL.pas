@@ -1505,6 +1505,7 @@ var
   LineTextStart: Integer;
   OldBkMode: Integer;
   SourceScanPosition: Integer;
+  BlockSourceLimit: Integer;
   SourceText: string;
 
   function InlineTokensForBlock(ABlock: TMarkDownBlock): TMarkDownInlineList;
@@ -1550,6 +1551,10 @@ var
         Inc(FoundAt);
       if FoundAt > Length(SourceText) then
         Exit;
+      // Don't let the scan find this block's break in the next block's
+      // source - that derails the source<->selectable mapping (#caret jump).
+      if FoundAt >= BlockSourceLimit then
+        Exit;
       Result := FoundAt - 1;
       // An exact match consumes only itself so consecutive line breaks
       // (blank lines in code blocks) map one atom per break; otherwise
@@ -1567,7 +1572,10 @@ var
     end;
 
     FoundAt := PosEx(AText, SourceText, SourceScanPosition);
-    if FoundAt = 0 then
+    // A match in a later block's source means the atom is genuinely absent
+    // here (e.g. a decoded entity or link text); treat it as having no
+    // source rather than borrowing the next block's position.
+    if (FoundAt = 0) or (FoundAt >= BlockSourceLimit) then
       Exit;
     Result := FoundAt - 1;
     SourceScanPosition := FoundAt + Length(AText);
@@ -2213,6 +2221,19 @@ begin
       FLastBlockTop := Y;
     Block := Blocks[I];
     Block.LayoutTop := Y + FScrollPos;
+    // Anchor the source scan to this block's own line and forbid it from
+    // reaching into the next block. The rendered atom -> source search is a
+    // heuristic that derails on lines where the rendered text diverges from
+    // the source (autolinks, reference links, decoded HTML entities);
+    // bounding it per block keeps chunk source offsets monotonic so the
+    // caret round-trip in ChangeHeadingLevel lands on the right line.
+    if (Block.SourceStartLine >= 0) and (Block.SourceStartLine < FMarkdown.Count) then
+      SourceScanPosition := LineStartSourcePos(Block.SourceStartLine) + 1;
+    if (I + 1 < Blocks.Count) and (Blocks[I + 1].SourceStartLine >= 0) and
+       (Blocks[I + 1].SourceStartLine < FMarkdown.Count) then
+      BlockSourceLimit := LineStartSourcePos(Blocks[I + 1].SourceStartLine) + 1
+    else
+      BlockSourceLimit := Length(SourceText) + 1;
     case Block.Kind of
       bkHeading:
         begin
@@ -2402,7 +2423,7 @@ begin
 
   Result := 0;
   P := Pos(#13#10, S);
-  while (P > 0) and (P + 1 < SourcePos) do
+  while (P > 0) and (P + 1 <= SourcePos) do
   begin
     Inc(Result);
     P := PosEx(#13#10, S, P + 2);
