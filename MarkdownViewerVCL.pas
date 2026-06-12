@@ -96,6 +96,7 @@ type
     procedure CopySelectionToClipboard(PlainText: Boolean);
     procedure DeleteSelectionOrCharacter(Backwards: Boolean);
     procedure InsertTextAtSelection(const Value: string);
+    procedure ToggleInlineFormat(const AMarker: string);
     procedure InvalidateLayout;
     procedure MarkdownChanged(Sender: TObject);
     procedure MoveCaret(Delta: Integer; ExtendSelection: Boolean);
@@ -533,6 +534,16 @@ begin
   case Key of
     Ord('A'):
       SelectAllText;
+    Ord('B'):
+      if not FReadOnly then
+        ToggleInlineFormat('**')
+      else
+        Result := False;
+    Ord('I'):
+      if not FReadOnly then
+        ToggleInlineFormat('*')
+      else
+        Result := False;
     Ord('C'):
       CopySelectionToClipboard(ssShift in Shift);
     Ord('V'):
@@ -993,6 +1004,102 @@ begin
 
   ApplyMarkdownText(SourceText);
   FinishEditAtSource(NewSourceCaret);
+end;
+
+// Wrap the selection in AMarker (e.g. '**' for bold, '*' for italic), or unwrap
+// it when it is already wrapped. With no selection, insert an empty pair and
+// place the caret between the markers ready to type. The selection is preserved
+// over the formatted text so the shortcut can be pressed again to toggle off.
+procedure TMarkDownViewer.ToggleInlineFormat(const AMarker: string);
+var
+  SelStart: Integer;
+  SelEnd: Integer;
+  SourceStart: Integer;
+  SourceEnd: Integer;
+  Temp: Integer;
+  MarkerLen: Integer;
+  SourceText: string;
+  Selected: string;
+  NewSelStart: Integer;
+  NewSelEnd: Integer;
+begin
+  if FReadOnly then
+    Exit;
+  if FSelectableText = '' then
+    Repaint;
+  MarkerLen := Length(AMarker);
+
+  SelStart := Min(FSelectionAnchor, FSelectionCaret);
+  SelEnd := Max(FSelectionAnchor, FSelectionCaret);
+  SourceStart := SelectableToSourcePosition(SelStart);
+  SourceEnd := SelectableToSourcePosition(SelEnd);
+  if SourceEnd < SourceStart then
+  begin
+    Temp := SourceStart;
+    SourceStart := SourceEnd;
+    SourceEnd := Temp;
+  end;
+
+  PushUndoState;
+  SourceText := FMarkdown.Text;
+
+  // Markers must hug the content (emphasis cannot have whitespace just inside
+  // it), so shrink the range past any selected leading/trailing whitespace -
+  // this also drops the trailing line break a select-all picks up.
+  while (SourceStart < SourceEnd) and
+    CharInSet(SourceText[SourceStart + 1], [' ', #9, #13, #10]) do
+    Inc(SourceStart);
+  while (SourceEnd > SourceStart) and
+    CharInSet(SourceText[SourceEnd], [' ', #9, #13, #10]) do
+    Dec(SourceEnd);
+
+  // Mapping the selection edges can land just inside the markers (a select-all
+  // reaches past the closing pair via the trailing break). Pull any markers
+  // that fall inside the range out of it, so the range bounds the content with
+  // its markers (if any) just outside - making the toggle decision symmetric.
+  if SourceStart < SourceEnd then
+  begin
+    if Copy(SourceText, SourceStart + 1, MarkerLen) = AMarker then
+      Inc(SourceStart, MarkerLen);
+    if (SourceEnd - MarkerLen >= SourceStart) and
+      (Copy(SourceText, SourceEnd - MarkerLen + 1, MarkerLen) = AMarker) then
+      Dec(SourceEnd, MarkerLen);
+  end;
+
+  if SourceStart = SourceEnd then
+  begin
+    Insert(AMarker + AMarker, SourceText, SourceStart + 1);
+    NewSelStart := SourceStart + MarkerLen;
+    NewSelEnd := NewSelStart;
+  end
+  else if (SourceStart >= MarkerLen) and
+    (SourceEnd + MarkerLen <= Length(SourceText)) and
+    (Copy(SourceText, SourceStart - MarkerLen + 1, MarkerLen) = AMarker) and
+    (Copy(SourceText, SourceEnd + 1, MarkerLen) = AMarker) then
+  begin
+    // The selection is already wrapped (the markers sit just outside it, since
+    // they are not part of the rendered text) - remove them to toggle off.
+    Delete(SourceText, SourceEnd + 1, MarkerLen);
+    Delete(SourceText, SourceStart - MarkerLen + 1, MarkerLen);
+    NewSelStart := SourceStart - MarkerLen;
+    NewSelEnd := SourceEnd - MarkerLen;
+  end
+  else
+  begin
+    Selected := Copy(SourceText, SourceStart + 1, SourceEnd - SourceStart);
+    Delete(SourceText, SourceStart + 1, SourceEnd - SourceStart);
+    Insert(AMarker + Selected + AMarker, SourceText, SourceStart + 1);
+    NewSelStart := SourceStart + MarkerLen;
+    NewSelEnd := NewSelStart + Length(Selected);
+  end;
+
+  ApplyMarkdownText(SourceText);
+  Repaint;
+  FSelectionAnchor := SourceToSelectablePosition(NewSelStart);
+  FSelectionCaret := SourceToSelectablePosition(NewSelEnd);
+  FDesiredCaretX := -1;
+  ScrollCaretIntoView;
+  Invalidate;
 end;
 
 // Move the caret to NewPosition, dragging the selection anchor with it unless

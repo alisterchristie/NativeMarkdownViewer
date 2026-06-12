@@ -153,6 +153,12 @@ type
     procedure CtrlZUndoesAndCtrlYRedoes;
     [Test]
     procedure DeleteKeyRemovesSelection;
+    [Test]
+    procedure CtrlBWrapsSelectionInBold;
+    [Test]
+    procedure CtrlBTogglesBoldOff;
+    [Test]
+    procedure CtrlIWrapsSelectionInItalic;
   end;
 
 implementation
@@ -1217,6 +1223,45 @@ begin
 
   Assert.AreEqual('', Trim(FViewer.MarkdownText));
   Assert.AreEqual('', FViewer.SelectedText);
+end;
+
+procedure TMarkDownViewerTests.CtrlBWrapsSelectionInBold;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'hello world';
+  RepaintViewer;
+
+  FViewer.PressKey(Ord('A'), [ssCtrl]);
+  FViewer.PressKey(Ord('B'), [ssCtrl]);
+
+  Assert.AreEqual('**hello world**', Trim(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.CtrlBTogglesBoldOff;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'hello world';
+  RepaintViewer;
+
+  FViewer.PressKey(Ord('A'), [ssCtrl]);
+  FViewer.PressKey(Ord('B'), [ssCtrl]);
+  Assert.AreEqual('**hello world**', Trim(FViewer.MarkdownText));
+
+  // The selection stays over the formatted text, so a second press toggles off.
+  FViewer.PressKey(Ord('B'), [ssCtrl]);
+  Assert.AreEqual('hello world', Trim(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.CtrlIWrapsSelectionInItalic;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'hello';
+  RepaintViewer;
+
+  FViewer.PressKey(Ord('A'), [ssCtrl]);
+  FViewer.PressKey(Ord('I'), [ssCtrl]);
+
+  Assert.AreEqual('*hello*', Trim(FViewer.MarkdownText));
 end;
 
 initialization
