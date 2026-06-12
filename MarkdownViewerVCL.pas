@@ -2393,17 +2393,21 @@ end;
 
 function TMarkDownViewer.SourcePosToLine(SourcePos: Integer): Integer;
 var
-  I: Integer;
-  Pos: Integer;
+  S: string;
+  P: Integer;
 begin
-  Pos := 0;
-  for I := 0 to FMarkdown.Count - 1 do
+  S := FMarkdown.Text;
+  if SourcePos <= 0 then Exit(0);
+  if SourcePos >= Length(S) then Exit(Max(0, FMarkdown.Count - 1));
+
+  Result := 0;
+  P := Pos(#13#10, S);
+  while (P > 0) and (P + 1 < SourcePos) do
   begin
-    Inc(Pos, Length(FMarkdown[I]) + 2);
-    if Pos > SourcePos then
-      Exit(I);
+    Inc(Result);
+    P := PosEx(#13#10, S, P + 2);
   end;
-  Result := FMarkdown.Count - 1;
+  Result := EnsureRange(Result, 0, FMarkdown.Count - 1);
 end;
 
 function TMarkDownViewer.LineStartSourcePos(LineIdx: Integer): Integer;
@@ -2500,6 +2504,9 @@ begin
     Exit;
   end;
 
+  // Block is a heading - guard against stale/invalid SourceStartLine
+  if (Block.SourceStartLine < 0) or (Block.SourceStartLine >= FMarkdown.Count) then Exit;
+
   // Check if this is a setext heading (underline on next line)
   UnderlineIdx := Block.SourceStartLine + 1;
   if (UnderlineIdx < FMarkdown.Count) and
@@ -2573,6 +2580,7 @@ begin
   end;
 
   // ATX heading: change # count or strip prefix
+  if (Block.SourceStartLine < 0) or (Block.SourceStartLine >= FMarkdown.Count) then Exit;
   OldLine := FMarkdown[Block.SourceStartLine];
   OldPrefixLen := GetHeadingPrefixLength(OldLine);
   OldLevel := Block.Level;
