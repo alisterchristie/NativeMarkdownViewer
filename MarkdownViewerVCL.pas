@@ -2467,6 +2467,7 @@ begin
 
   if Block.Kind <> bkHeading then
   begin
+    if Block.Kind <> bkParagraph then Exit;
     if Delta <= 0 then Exit;
     if (LineIdx < 0) or (LineIdx >= FMarkdown.Count) then Exit;
     OldLine := FMarkdown[LineIdx];
