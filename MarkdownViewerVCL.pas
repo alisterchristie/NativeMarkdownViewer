@@ -90,6 +90,10 @@ type
     procedure SetSearchHighlightColor(const Value: TColor);
     procedure SetSearchText(const Value: string);
     procedure SetScrollPosition(const Value: Integer);
+    function SourcePosToLine(SourcePos: Integer): Integer;
+    function GetBlockAtLine(LineIdx: Integer): TMarkDownBlock;
+    function LineStartSourcePos(LineIdx: Integer): Integer;
+    function GetHeadingPrefixLength(const Line: string): Integer;
     function GetEffectiveBackground: TColor;
     function GetEffectiveTextColor: TColor;
     function GetEffectiveSelectionBackground: TColor;
@@ -132,6 +136,7 @@ type
     procedure Redo;
     procedure SelectAll;
     procedure Undo;
+    procedure ChangeHeadingLevel(Delta: Integer);
     property MarkdownText: string read GetMarkdownText write SetMarkdownText;
     property MaxScrollPosition: Integer read GetMaxScrollPosition;
     property ScrollPosition: Integer read FScrollPos write SetScrollPosition;
@@ -572,6 +577,11 @@ begin
         DeleteSelectionOrCharacter(False);
       VK_ESCAPE:
         ClearSelection;
+      VK_TAB:
+        if ssShift in Shift then
+          ChangeHeadingLevel(-1)
+        else
+          ChangeHeadingLevel(1);
     else
       Handled := False;
     end;
@@ -2381,6 +2391,201 @@ begin
   Invalidate;
 end;
 
+function TMarkDownViewer.SourcePosToLine(SourcePos: Integer): Integer;
+var
+  I: Integer;
+  Pos: Integer;
+begin
+  Pos := 0;
+  for I := 0 to FMarkdown.Count - 1 do
+  begin
+    Inc(Pos, Length(FMarkdown[I]) + 2);
+    if Pos > SourcePos then
+      Exit(I);
+  end;
+  Result := FMarkdown.Count - 1;
+end;
+
+function TMarkDownViewer.LineStartSourcePos(LineIdx: Integer): Integer;
+var
+  I: Integer;
+begin
+  Result := 0;
+  for I := 0 to LineIdx - 1 do
+    Inc(Result, Length(FMarkdown[I]) + 2);
+end;
+
+function TMarkDownViewer.GetBlockAtLine(LineIdx: Integer): TMarkDownBlock;
+var
+  I: Integer;
+begin
+  Result := nil;
+  for I := 0 to FBlocks.Count - 1 do
+    if FBlocks[I].SourceStartLine <= LineIdx then
+      Result := FBlocks[I]
+    else
+      Break;
+end;
+
+function TMarkDownViewer.GetHeadingPrefixLength(const Line: string): Integer;
+var
+  T: string;
+begin
+  T := TMarkDownBlockParser.TrimLeftOnly(Line);
+  Result := 0;
+  while (Result < Length(T)) and (T[Result + 1] = '#') do
+    Inc(Result);
+  if Result > 0 then
+    Result := Result + Length(Line) - Length(T) + 1; // +1 for the space after #
+end;
+
+procedure TMarkDownViewer.ChangeHeadingLevel(Delta: Integer);
+var
+  Block: TMarkDownBlock;
+  LineIdx: Integer;
+  OldLine: string;
+  NewLine: string;
+  OldPrefixLen: Integer;
+  NewPrefixLen: Integer;
+  PrefixDelta: Integer;
+  OldSourcePos: Integer;
+  NewSourcePos: Integer;
+  LineStart: Integer;
+  T: string;
+  OldLevel: Integer;
+  NewLevel: Integer;
+  UnderlineIdx: Integer;
+  UnderlineLen: Integer;
+begin
+  if FReadOnly then Exit;
+  if FSelectableText = '' then Exit;
+
+  OldSourcePos := SelectableToSourcePosition(FSelectionCaret);
+  LineIdx := SourcePosToLine(OldSourcePos);
+  Block := GetBlockAtLine(LineIdx);
+  if Block = nil then Exit;
+
+  if Block.Kind <> bkHeading then
+  begin
+    if Delta <= 0 then Exit;
+    if (LineIdx < 0) or (LineIdx >= FMarkdown.Count) then Exit;
+    OldLine := FMarkdown[LineIdx];
+    NewLine := '# ' + OldLine;
+    if NewLine = OldLine then Exit;
+
+    FUndoStack.Add(FMarkdown.Text);
+    while FUndoStack.Count > MaxUndoDepth do
+      FUndoStack.Delete(0);
+    FRedoStack.Clear;
+
+    FApplyingEdit := True;
+    try
+      FMarkdown[LineIdx] := NewLine;
+    finally
+      FApplyingEdit := False;
+    end;
+
+    NewSourcePos := OldSourcePos + 2;
+    Repaint;
+    FSelectionCaret := SourceToSelectablePosition(NewSourcePos);
+    FSelectionAnchor := FSelectionCaret;
+    FDesiredCaretX := -1;
+    ScrollCaretIntoView;
+    Invalidate;
+    Exit;
+  end;
+
+  // Check if this is a setext heading (underline on next line)
+  UnderlineIdx := Block.SourceStartLine + 1;
+  if (UnderlineIdx < FMarkdown.Count) and
+     TMarkDownBlockParser.IsSetextUnderline(FMarkdown[UnderlineIdx], OldLevel) then
+  begin
+    // Setext heading: promote to H1 or demote to H2
+    if Delta = 0 then Exit;
+    if Delta > 0 then
+    begin
+      // Demote H1→H2 (change = to -) or H2 stays H2
+      if Block.Level = 2 then Exit;
+      // H1 → H2: change underline from = to -
+      UnderlineLen := Length(Trim(FMarkdown[UnderlineIdx]));
+      NewLine := StringOfChar('-', UnderlineLen);
+    end
+    else
+    begin
+      // Promote H2→H1 (change - to =) or H1 stays H1
+      if Block.Level = 1 then Exit;
+      // H2 → H1: change underline from - to =
+      UnderlineLen := Length(Trim(FMarkdown[UnderlineIdx]));
+      NewLine := StringOfChar('=', UnderlineLen);
+    end;
+
+    FUndoStack.Add(FMarkdown.Text);
+    while FUndoStack.Count > MaxUndoDepth do
+      FUndoStack.Delete(0);
+    FRedoStack.Clear;
+
+    FApplyingEdit := True;
+    try
+      FMarkdown[UnderlineIdx] := NewLine;
+    finally
+      FApplyingEdit := False;
+    end;
+
+    // Setext underline change doesn't affect caret position mapping
+    Repaint;
+    FSelectionCaret := SourceToSelectablePosition(OldSourcePos);
+    FSelectionAnchor := FSelectionCaret;
+    FDesiredCaretX := -1;
+    ScrollCaretIntoView;
+    Invalidate;
+    Exit;
+  end;
+
+  // ATX heading: change # count
+  OldLine := FMarkdown[Block.SourceStartLine];
+  OldPrefixLen := GetHeadingPrefixLength(OldLine);
+  OldLevel := Block.Level;
+  if OldLevel + Delta = OldLevel then Exit;
+  NewLevel := EnsureRange(OldLevel + Delta, 1, 6);
+  if NewLevel = OldLevel then Exit;
+
+  // Build new line: preserve leading whitespace, replace # count, keep rest
+  T := TMarkDownBlockParser.TrimLeftOnly(OldLine);
+  LineStart := Length(OldLine) - Length(T);
+  NewLine := Copy(OldLine, 1, LineStart) + StringOfChar('#', NewLevel) +
+    Copy(T, OldLevel + 1, MaxInt);
+
+  if NewLine = OldLine then Exit;
+
+  NewPrefixLen := GetHeadingPrefixLength(NewLine);
+  PrefixDelta := NewPrefixLen - OldPrefixLen;
+
+  FUndoStack.Add(FMarkdown.Text);
+  while FUndoStack.Count > MaxUndoDepth do
+    FUndoStack.Delete(0);
+  FRedoStack.Clear;
+
+  FApplyingEdit := True;
+  try
+    FMarkdown[Block.SourceStartLine] := NewLine;
+  finally
+    FApplyingEdit := False;
+  end;
+
+  // Adjust caret: if it was past the prefix, shift by prefix delta
+  if OldSourcePos >= LineStartSourcePos(Block.SourceStartLine) + OldPrefixLen then
+    NewSourcePos := OldSourcePos + PrefixDelta
+  else
+    NewSourcePos := OldSourcePos;
+
+  Repaint;
+  FSelectionCaret := SourceToSelectablePosition(NewSourcePos);
+  FSelectionAnchor := FSelectionCaret;
+  FDesiredCaretX := -1;
+  ScrollCaretIntoView;
+  Invalidate;
+end;
+
 procedure TMarkDownViewer.ToggleTaskAtLine(SourceLine: Integer);
 var
   NewLine: string;
@@ -2722,10 +2927,10 @@ procedure TMarkDownViewer.WMGetDlgCode(var Message: TMessage);
 begin
   inherited;
   // Leave Tab free for dialog navigation when read-only; while editing the
-  // control needs every key (Enter, Escape) like a multi-line edit.
+  // control needs every key (Tab, Enter, Escape) like a multi-line edit.
   Message.Result := Message.Result or DLGC_WANTARROWS;
   if not FReadOnly then
-    Message.Result := Message.Result or DLGC_WANTCHARS or DLGC_WANTALLKEYS;
+    Message.Result := Message.Result or DLGC_WANTCHARS or DLGC_WANTALLKEYS or DLGC_WANTTAB;
 end;
 
 procedure TMarkDownViewer.WMMouseWheel(var Message: TWMMouseWheel);
