@@ -150,6 +150,10 @@ type
     [Test]
     procedure TabIndentsChecklistItem;
     [Test]
+    procedure CtrlKInsertsLink;
+    [Test]
+    procedure CtrlKWrapsSelectionInLink;
+    [Test]
     procedure TabOnHeadingPreservesCaretColumn;
     [Test]
     procedure ReadOnlyArrowKeysScroll;
@@ -1266,6 +1270,34 @@ begin
   FViewer.PressKey(VK_TAB);
 
   Assert.AreEqual('  - [x] task', TrimRight(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.CtrlKInsertsLink;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'Hello';
+  FViewer.ReadOnly := False;
+  RepaintViewer;
+
+  FViewer.PressKey(VK_END);
+  FViewer.PressKey(Ord('K'), [ssCtrl]);
+
+  Assert.AreEqual('Hello[]()', TrimRight(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.CtrlKWrapsSelectionInLink;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'Hello';
+  FViewer.ReadOnly := False;
+  RepaintViewer;
+
+  // Select "Hello"
+  FViewer.PressKey(VK_HOME);
+  FViewer.PressKey(VK_END, [ssShift]);
+  FViewer.PressKey(Ord('K'), [ssCtrl]);
+
+  Assert.AreEqual('[Hello]()', TrimRight(FViewer.MarkdownText));
 end;
 
 procedure TMarkDownViewerTests.ReadOnlyArrowKeysScroll;

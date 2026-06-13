@@ -304,6 +304,7 @@ type
     procedure ToggleItalic;
     procedure ToggleStrikethrough;
     procedure ToggleInlineCode;
+    procedure ToggleLink;
     procedure SelectWordAtCaret;
     function AsHtml: string;
     function AsHtmlDocument(const ATitle: string = ''): string;
@@ -1036,6 +1037,11 @@ begin
     Ord('E'):
       if not FReadOnly then
         ToggleInlineCode
+      else
+        Result := False;
+    Ord('K'):
+      if not FReadOnly then
+        ToggleLink
       else
         Result := False;
     Ord('C'):
@@ -4213,6 +4219,59 @@ end;
 procedure TMarkDownViewer.ToggleInlineCode;
 begin
   ToggleInlineFormat('`');
+end;
+
+procedure TMarkDownViewer.ToggleLink;
+var
+  SelStart, SelEnd: Integer;
+  SourceStart, SourceEnd, Temp: Integer;
+  SourceText, Selected: string;
+  NewCaret: Integer;
+  OldSourcePos: Integer;
+begin
+  if FReadOnly then Exit;
+  if FSelectableText = '' then Exit;
+
+  if not HasSelection then
+  begin
+    OldSourcePos := SelectableToSourcePosition(FSelectionCaret);
+    SourceText := FMarkdown.Text;
+    PushUndoState;
+    Insert('[]()', SourceText, OldSourcePos + 1);
+    ApplyMarkdownText(SourceText);
+    NewCaret := SourceToSelectablePosition(OldSourcePos + 1);
+    FSelectionAnchor := NewCaret;
+    FSelectionCaret := NewCaret;
+    FDesiredCaretX := -1;
+    ScrollCaretIntoView;
+    Invalidate;
+    Exit;
+  end;
+
+  SelStart := Min(FSelectionAnchor, FSelectionCaret);
+  SelEnd := Max(FSelectionAnchor, FSelectionCaret);
+  SourceStart := SelectableToSourcePosition(SelStart);
+  SourceEnd := SelectableToSourcePosition(SelEnd);
+  if SourceEnd < SourceStart then
+  begin
+    Temp := SourceStart;
+    SourceStart := SourceEnd;
+    SourceEnd := Temp;
+  end;
+
+  SourceText := FMarkdown.Text;
+  PushUndoState;
+  Selected := Copy(SourceText, SourceStart + 1, SourceEnd - SourceStart);
+  Delete(SourceText, SourceStart + 1, SourceEnd - SourceStart);
+  Insert('[' + Selected + ']()', SourceText, SourceStart + 1);
+  ApplyMarkdownText(SourceText);
+  
+  NewCaret := SourceToSelectablePosition(SourceStart + Length(Selected) + 3);
+  FSelectionAnchor := NewCaret;
+  FSelectionCaret := NewCaret;
+  FDesiredCaretX := -1;
+  ScrollCaretIntoView;
+  Invalidate;
 end;
 
 // Select the run of non-whitespace characters around the caret (the word under
