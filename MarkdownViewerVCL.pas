@@ -2610,6 +2610,8 @@ procedure TMarkDownViewer.AssignInlineFont(const Token: TMarkDownInlineToken;
   BaseStyle: TFontStyles; SizeDelta: Integer);
 begin
   Canvas.Font.Assign(Font);
+  if Token.IsSuperscript or Token.IsSubscript then
+    SizeDelta := SizeDelta - 3;
   Canvas.Font.Size := Max(1, Font.Size + SizeDelta);
   if Token.IsCode then
   begin
@@ -2652,6 +2654,7 @@ function TMarkDownViewer.DrawInline(ATokens: TMarkDownInlineList;
     PendingMarkdownPrefix: string;
     AtomMarkdown: string;
     TextStart: Integer;
+    TextY: Integer;
 
     procedure DrawSearchHighlights(const AText: string; TextX, TextY, TextHeight: Integer);
     var
@@ -2801,7 +2804,12 @@ function TMarkDownViewer.DrawInline(ATokens: TMarkDownInlineList;
             DrawSearchHighlights(Atom, X, YPos + 2, LineHeight - 2);
             DrawSelectionBackground(Atom, X, YPos + 2, LineHeight - 2, TextStart);
             OldBkMode := SetBkMode(Canvas.Handle, TRANSPARENT);
-            DrawSelectableText(Atom, X, YPos + 2, TextStart);
+            TextY := YPos + 2;
+            if ATokens[TokenIndex].IsSuperscript then
+              Dec(TextY, 3)
+            else if ATokens[TokenIndex].IsSubscript then
+              Inc(TextY, 3);
+            DrawSelectableText(Atom, X, TextY, TextStart);
             SetBkMode(Canvas.Handle, OldBkMode);
             if (ATokens[TokenIndex].Url <> '') and (Trim(Atom) <> '') and (FLinkHits <> nil) then
             begin

@@ -145,6 +145,10 @@ type
     procedure ParseInlineParsesHighlight;
     [Test]
     procedure TokenMapHandlesHighlight;
+    [Test]
+    procedure ParseInlineParsesSubSuper;
+    [Test]
+    procedure TokenMapHandlesSubSuper;
   end;
 
 implementation
@@ -1379,6 +1383,70 @@ begin
     Assert.AreEqual(2, Length(Tokens[1].SourceMap));
     Assert.AreEqual(40, Tokens[1].SourceMap[0]);
     Assert.AreEqual(50, Tokens[1].SourceMap[1]);
+  finally
+    Tokens.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.ParseInlineParsesSubSuper;
+var
+  Tokens: TMarkDownInlineList;
+begin
+  Tokens := TMarkDownBlockParser.ParseInline('x^2^ and H~2~O');
+  try
+    Assert.AreEqual(5, Tokens.Count);
+    Assert.AreEqual('x', Tokens[0].Text);
+    Assert.IsFalse(Tokens[0].IsSuperscript);
+    Assert.IsFalse(Tokens[0].IsSubscript);
+
+    Assert.AreEqual('2', Tokens[1].Text);
+    Assert.IsTrue(Tokens[1].IsSuperscript);
+    Assert.IsFalse(Tokens[1].IsSubscript);
+
+    Assert.AreEqual(' and H', Tokens[2].Text);
+    Assert.IsFalse(Tokens[2].IsSuperscript);
+    Assert.IsFalse(Tokens[2].IsSubscript);
+
+    Assert.AreEqual('2', Tokens[3].Text);
+    Assert.IsFalse(Tokens[3].IsSuperscript);
+    Assert.IsTrue(Tokens[3].IsSubscript);
+
+    Assert.AreEqual('O', Tokens[4].Text);
+    Assert.IsFalse(Tokens[4].IsSuperscript);
+    Assert.IsFalse(Tokens[4].IsSubscript);
+  finally
+    Tokens.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.TokenMapHandlesSubSuper;
+var
+  Tokens: TMarkDownInlineList;
+  Map: TArray<Integer>;
+  I: Integer;
+begin
+  SetLength(Map, 12);
+  for I := 0 to 11 do
+    Map[I] := I * 10;
+
+  Tokens := TMarkDownBlockParser.ParseInline('A ^B^ ~C~ D', nil, Map);
+  try
+    Assert.AreEqual(5, Tokens.Count);
+    Assert.AreEqual('A ', Tokens[0].Text);
+    Assert.AreEqual('B', Tokens[1].Text);
+    Assert.AreEqual(' ', Tokens[2].Text);
+    Assert.AreEqual('C', Tokens[3].Text);
+    Assert.AreEqual(' D', Tokens[4].Text);
+
+    Assert.IsTrue(Tokens[1].IsSuperscript);
+    Assert.AreEqual(2, Length(Tokens[1].SourceMap));
+    Assert.AreEqual(30, Tokens[1].SourceMap[0]);
+    Assert.AreEqual(40, Tokens[1].SourceMap[1]);
+
+    Assert.IsTrue(Tokens[3].IsSubscript);
+    Assert.AreEqual(2, Length(Tokens[3].SourceMap));
+    Assert.AreEqual(70, Tokens[3].SourceMap[0]);
+    Assert.AreEqual(80, Tokens[3].SourceMap[1]);
   finally
     Tokens.Free;
   end;

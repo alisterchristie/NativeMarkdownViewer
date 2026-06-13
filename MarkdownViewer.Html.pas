@@ -48,6 +48,10 @@ begin
     Result := '<strong>' + Result + '</strong>';
   if Token.IsHighlighted then
     Result := '<mark>' + Result + '</mark>';
+  if Token.IsSuperscript then
+    Result := '<sup>' + Result + '</sup>';
+  if Token.IsSubscript then
+    Result := '<sub>' + Result + '</sub>';
   if Token.Url <> '' then
     Result := '<a href="' + HtmlEscape(Token.Url) + '">' + Result + '</a>';
 end;

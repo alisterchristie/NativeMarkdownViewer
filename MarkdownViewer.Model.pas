@@ -23,6 +23,8 @@ type
     Url: string;
     LineBreak: Boolean;
     IsHighlighted: Boolean;
+    IsSuperscript: Boolean;
+    IsSubscript: Boolean;
     // Maps each character of Text to its 0-based document offset, with one
     // trailing entry for the position just past the last character (same shape
     // as TMarkDownBlock.SourceMap). Empty when the token was parsed without a
