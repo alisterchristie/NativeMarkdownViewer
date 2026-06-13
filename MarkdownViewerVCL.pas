@@ -97,6 +97,7 @@ type
     procedure DeleteSelectionOrCharacter(Backwards: Boolean);
     procedure InsertTextAtSelection(const Value: string);
     procedure ToggleInlineFormat(const AMarker: string);
+    function WrapSelectionWith(const AOpen, AClose: string): Boolean;
     procedure InvalidateLayout;
     procedure MarkdownChanged(Sender: TObject);
     procedure MoveCaret(Delta: Integer; ExtendSelection: Boolean);
@@ -712,6 +713,8 @@ begin
 end;
 
 procedure TMarkDownViewer.KeyPress(var Key: Char);
+var
+  Wrapped: Boolean;
 begin
   inherited KeyPress(Key);
   if FReadOnly then
@@ -727,7 +730,17 @@ begin
       end;
     #32..#65535:
       begin
-        InsertTextAtSelection(Key);
+        // Typing an opening bracket/quote over a selection wraps it.
+        case Key of
+          '(': Wrapped := WrapSelectionWith('(', ')');
+          '[': Wrapped := WrapSelectionWith('[', ']');
+          '{': Wrapped := WrapSelectionWith('{', '}');
+          '"': Wrapped := WrapSelectionWith('"', '"');
+        else
+          Wrapped := False;
+        end;
+        if not Wrapped then
+          InsertTextAtSelection(Key);
         Key := #0;
       end;
   end;
@@ -1136,6 +1149,61 @@ begin
   FDesiredCaretX := -1;
   ScrollCaretIntoView;
   Invalidate;
+end;
+
+// Surround the selection with AOpen/AClose (auto-pairing brackets and quotes),
+// keeping the selection over the wrapped content. Returns False (and does
+// nothing) when there is no usable selection, so the caller inserts the
+// character literally instead.
+function TMarkDownViewer.WrapSelectionWith(const AOpen, AClose: string): Boolean;
+var
+  SelStart: Integer;
+  SelEnd: Integer;
+  SourceStart: Integer;
+  SourceEnd: Integer;
+  Temp: Integer;
+  SourceText: string;
+  Selected: string;
+begin
+  Result := False;
+  if FReadOnly or not HasSelection then
+    Exit;
+
+  SelStart := Min(FSelectionAnchor, FSelectionCaret);
+  SelEnd := Max(FSelectionAnchor, FSelectionCaret);
+  SourceStart := SelectableToSourcePosition(SelStart);
+  SourceEnd := SelectableToSourcePosition(SelEnd);
+  if SourceEnd < SourceStart then
+  begin
+    Temp := SourceStart;
+    SourceStart := SourceEnd;
+    SourceEnd := Temp;
+  end;
+
+  SourceText := FMarkdown.Text;
+  while (SourceStart < SourceEnd) and
+    CharInSet(SourceText[SourceStart + 1], [' ', #9, #13, #10]) do
+    Inc(SourceStart);
+  while (SourceEnd > SourceStart) and
+    CharInSet(SourceText[SourceEnd], [' ', #9, #13, #10]) do
+    Dec(SourceEnd);
+  if SourceStart = SourceEnd then
+    Exit;
+
+  PushUndoState;
+  Selected := Copy(SourceText, SourceStart + 1, SourceEnd - SourceStart);
+  Delete(SourceText, SourceStart + 1, SourceEnd - SourceStart);
+  Insert(AOpen + Selected + AClose, SourceText, SourceStart + 1);
+
+  ApplyMarkdownText(SourceText);
+  Repaint;
+  FSelectionAnchor := SourceToSelectablePosition(SourceStart + Length(AOpen));
+  FSelectionCaret := SourceToSelectablePosition(
+    SourceStart + Length(AOpen) + Length(Selected));
+  FDesiredCaretX := -1;
+  ScrollCaretIntoView;
+  Invalidate;
+  Result := True;
 end;
 
 // Move the caret to NewPosition, dragging the selection anchor with it unless

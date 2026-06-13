@@ -169,6 +169,10 @@ type
     procedure CtrlBackspaceDeletesWord;
     [Test]
     procedure CtrlDeleteDeletesWordForward;
+    [Test]
+    procedure TypingBracketWrapsSelection;
+    [Test]
+    procedure TypingCharWithoutSelectionInsertsLiterally;
   end;
 
 implementation
@@ -1339,6 +1343,30 @@ begin
   FViewer.PressKey(VK_DELETE, [ssCtrl]);
 
   Assert.AreEqual('bravo charlie', Trim(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.TypingBracketWrapsSelection;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'hello world';
+  RepaintViewer;
+
+  FViewer.PressKey(Ord('A'), [ssCtrl]);
+  FViewer.TypeCharacter('(');
+
+  Assert.AreEqual('(hello world)', Trim(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.TypingCharWithoutSelectionInsertsLiterally;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'ab';
+  RepaintViewer;
+
+  // No selection: an opener is inserted literally, not paired.
+  FViewer.TypeCharacter('(');
+
+  Assert.AreEqual('(ab', Trim(FViewer.MarkdownText));
 end;
 
 initialization
