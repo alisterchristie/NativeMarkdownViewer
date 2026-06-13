@@ -1502,7 +1502,11 @@ begin
   FViewer.TypeCharacter('w');
   FViewer.TypeCharacter('o');
 
-  Assert.AreEqual('- one' + sLineBreak + '- two', Trim(FViewer.MarkdownText));
+  Assert.AreEqual(
+    '''
+    - one
+    - two
+    ''', Trim(FViewer.MarkdownText));
 end;
 
 procedure TMarkDownViewerTests.EnterIncrementsOrderedList;
@@ -1515,7 +1519,11 @@ begin
   FViewer.TypeCharacter(#13);
   FViewer.TypeCharacter('x');
 
-  Assert.AreEqual('1. first' + sLineBreak + '2. x', Trim(FViewer.MarkdownText));
+  Assert.AreEqual(
+    '''
+    1. first
+    2. x
+    ''', Trim(FViewer.MarkdownText));
 end;
 
 procedure TMarkDownViewerTests.EnterContinuesTaskAsUnchecked;
@@ -1528,8 +1536,11 @@ begin
   FViewer.TypeCharacter(#13);
   FViewer.TypeCharacter('y');
 
-  Assert.AreEqual('- [x] done' + sLineBreak + '- [ ] y',
-    Trim(FViewer.MarkdownText));
+  Assert.AreEqual(
+    '''
+    - [x] done
+    - [ ] y
+    ''', Trim(FViewer.MarkdownText));
 end;
 
 procedure TMarkDownViewerTests.EnterOnEmptyItemExitsList;
@@ -1547,7 +1558,11 @@ end;
 procedure TMarkDownViewerTests.EnterInMiddleOfListInsertsItem;
 begin
   ShowViewer(400, 300);
-  FViewer.MarkdownText := '- one' + sLineBreak + '- three';
+  FViewer.MarkdownText :=
+    '''
+    - one
+    - three
+    ''';
   RepaintViewer;
 
   // Caret at end of "one" (first item), Enter then type makes a middle item.
@@ -1557,17 +1572,23 @@ begin
   FViewer.TypeCharacter('w');
   FViewer.TypeCharacter('o');
 
-  Assert.AreEqual('- one' + sLineBreak + '- two' + sLineBreak + '- three',
-    Trim(FViewer.MarkdownText));
+  Assert.AreEqual(
+    '''
+    - one
+    - two
+    - three
+    ''', Trim(FViewer.MarkdownText));
 end;
 
 procedure TMarkDownViewerTests.CodeBlockWithoutHighlightingRendersWithoutException;
 begin
   ShowViewer(400, 300);
   FViewer.MarkdownText :=
-    '```' + sLineBreak +
-    'plain code line' + sLineBreak +
-    '```';
+    '''
+    ```
+    plain code line
+    ```
+    ''';
   RepaintViewer;
 
   FViewer.SelectAll;
@@ -1578,11 +1599,13 @@ procedure TMarkDownViewerTests.CodeBlockWithHighlightingRendersWithoutException;
 begin
   ShowViewer(400, 300);
   FViewer.MarkdownText :=
-    '```pascal' + sLineBreak +
-    'begin' + sLineBreak +
-    '  WriteLn(''Hello'');' + sLineBreak +
-    'end.' + sLineBreak +
-    '```';
+    '''
+    ```pascal
+    begin
+      WriteLn('Hello');
+    end.
+    ```
+    ''';
   RepaintViewer;
 
   FViewer.SelectAll;
@@ -1596,9 +1619,11 @@ var
 begin
   ShowViewer(400, 300);
   FViewer.MarkdownText :=
-    '```' + sLineBreak +
-    'test code' + sLineBreak +
-    '```';
+    '''
+    ```
+    test code
+    ```
+    ''';
   RepaintViewer;
  
   Assert.AreEqual(1, FViewer.GetCodeBlockCount);
@@ -1624,9 +1649,11 @@ var
 begin
   ShowViewer(400, 300);
   FViewer.MarkdownText :=
-    '```' + sLineBreak +
-    'my secret code' + sLineBreak +
-    '```';
+    '''
+    ```
+    my secret code
+    ```
+    ''';
   RepaintViewer;
  
   BtnRect := FViewer.GetCodeBlockCopyBtnRect(0);

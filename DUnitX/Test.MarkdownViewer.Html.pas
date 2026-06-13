@@ -105,7 +105,11 @@ procedure TMarkdownHtmlTests.BulletListEmitsUl;
 var
   Html: string;
 begin
-  Html := MarkdownToHtml('- one'#13#10'- two');
+  Html := MarkdownToHtml(
+    '''
+    - one
+    - two
+    ''');
   Assert.IsTrue(Html.Contains('<ul>'), Html);
   Assert.IsTrue(Html.Contains('<li>one'), Html);
   Assert.IsTrue(Html.Contains('<li>two'), Html);
@@ -116,7 +120,11 @@ procedure TMarkdownHtmlTests.OrderedListEmitsOl;
 var
   Html: string;
 begin
-  Html := MarkdownToHtml('1. one'#13#10'2. two');
+  Html := MarkdownToHtml(
+    '''
+    1. one
+    2. two
+    ''');
   Assert.IsTrue(Html.Contains('<ol>'), Html);
   Assert.IsTrue(Html.Contains('</ol>'), Html);
 end;
@@ -126,7 +134,11 @@ var
   Html: string;
   FirstUl, SecondUl: Integer;
 begin
-  Html := MarkdownToHtml('- top'#13#10'  - nested');
+  Html := MarkdownToHtml(
+    '''
+    - top
+      - nested
+    ''');
   // Two <ul> opens with no </ul> between them indicates nesting.
   FirstUl := Html.IndexOf('<ul>');
   SecondUl := Html.IndexOf('<ul>', FirstUl + 1);
@@ -138,7 +150,11 @@ procedure TMarkdownHtmlTests.TaskListEmitsCheckbox;
 var
   Html: string;
 begin
-  Html := MarkdownToHtml('- [x] done'#13#10'- [ ] todo');
+  Html := MarkdownToHtml(
+    '''
+    - [x] done
+    - [ ] todo
+    ''');
   Assert.IsTrue(Html.Contains('type="checkbox" checked'), Html);
   Assert.IsTrue(Html.Contains('type="checkbox" disabled'), Html);
 end;
@@ -147,7 +163,12 @@ procedure TMarkdownHtmlTests.CodeBlockEmitsPre;
 var
   Html: string;
 begin
-  Html := MarkdownToHtml('```'#13#10'a < b'#13#10'```');
+  Html := MarkdownToHtml(
+    '''
+    ```
+    a < b
+    ```
+    ''');
   Assert.IsTrue(Html.Contains('<pre><code>'), Html);
   Assert.IsTrue(Html.Contains('a &lt; b'), Html); // escaped, not parsed
 end;
@@ -167,7 +188,12 @@ procedure TMarkdownHtmlTests.TableEmitsTableWithAlignment;
 var
   Html: string;
 begin
-  Html := MarkdownToHtml('| a | b |'#13#10'| :--- | ---: |'#13#10'| 1 | 2 |');
+  Html := MarkdownToHtml(
+    '''
+    | a | b |
+    | :--- | ---: |
+    | 1 | 2 |
+    ''');
   Assert.IsTrue(Html.Contains('<table>'), Html);
   Assert.IsTrue(Html.Contains('<th'), Html);
   Assert.IsTrue(Html.Contains('text-align:right'), Html);
