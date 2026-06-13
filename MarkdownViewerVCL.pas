@@ -102,6 +102,7 @@ type
     FQuoteBarColor: TColor;
     FHeadingRuleColor: TColor;
     FSearchHighlightColor: TColor;
+    FHighlightColor: TColor;
     FBasePath: string;
     FImageCache: TObjectDictionary<string, TPicture>;
     FImageAges: TDictionary<string, TDateTime>;
@@ -211,6 +212,7 @@ type
     procedure ToggleTaskAtLine(SourceLine: Integer);
     procedure SetReadOnly(const Value: Boolean);
     procedure SetLinkColor(const Value: TColor);
+    procedure SetHighlightColor(const Value: TColor);
     procedure SetMarkdown(const Value: TStrings);
     procedure SetMarkdownText(const Value: string);
     procedure SetQuoteBarColor(const Value: TColor);
@@ -242,6 +244,7 @@ type
     procedure GetBackgroundChannels(out R, G, B: Integer; out IsLight: Boolean);
     function GetEffectiveCodeBackgroundColor: TColor;
     function GetEffectiveSearchHighlightColor: TColor;
+    function GetEffectiveHighlightColor: TColor;
     function GetEffectiveHeadingRuleColor: TColor;
     function GetEffectiveQuoteBarColor: TColor;
     function GetEffectiveLinkColor: TColor;
@@ -298,6 +301,7 @@ type
     property CodeFontName: string read FCodeFontName write SetCodeFontName;
     property Constraints;
     property HeadingRuleColor: TColor read FHeadingRuleColor write SetHeadingRuleColor default clDefault;
+    property HighlightColor: TColor read FHighlightColor write SetHighlightColor default clDefault;
     property ReadOnly: Boolean read FReadOnly write SetReadOnly default True;
     property Enabled;
     property Font;
@@ -430,6 +434,7 @@ begin
   FQuoteBarColor := clDefault;
   FHeadingRuleColor := clDefault;
   FSearchHighlightColor := clDefault;
+  FHighlightColor := clDefault;
   FMarkdown := TStringList.Create;
   FMarkdown.OnChange := MarkdownChanged;
   FSyntaxColors := TMarkdownSyntaxColors.Create(Self);
@@ -926,6 +931,21 @@ begin
     Result := RGB(Min(255, R + 20), Min(255, G + 20), Max(0, B - 40))
   else
     Result := RGB(Min(255, R + 64), Min(255, G + 64), Min(255, B + 72));
+end;
+
+function TMarkDownViewer.GetEffectiveHighlightColor: TColor;
+var
+  R, G, B: Integer;
+  IsLight: Boolean;
+begin
+  if FHighlightColor <> clDefault then
+    Exit(FHighlightColor);
+
+  GetBackgroundChannels(R, G, B, IsLight);
+  if IsLight then
+    Result := RGB(255, 255, 160) // Soft yellow
+  else
+    Result := RGB(96, 96, 0);    // Dark gold/yellow
 end;
 
 function TMarkDownViewer.GetEffectiveHeadingRuleColor: TColor;
@@ -2768,6 +2788,16 @@ function TMarkDownViewer.DrawInline(ATokens: TMarkDownInlineList;
               Canvas.Brush.Color := OldBrushColor;
               Canvas.Brush.Style := OldBrushStyle;
             end;
+            if ATokens[TokenIndex].IsHighlighted then
+            begin
+              OldBrushColor := Canvas.Brush.Color;
+              OldBrushStyle := Canvas.Brush.Style;
+              Canvas.Brush.Color := GetEffectiveHighlightColor;
+              Canvas.Brush.Style := bsSolid;
+              Canvas.FillRect(AtomRect);
+              Canvas.Brush.Color := OldBrushColor;
+              Canvas.Brush.Style := OldBrushStyle;
+            end;
             DrawSearchHighlights(Atom, X, YPos + 2, LineHeight - 2);
             DrawSelectionBackground(Atom, X, YPos + 2, LineHeight - 2, TextStart);
             OldBkMode := SetBkMode(Canvas.Handle, TRANSPARENT);
@@ -3947,6 +3977,15 @@ begin
   if FSearchHighlightColor <> Value then
   begin
     FSearchHighlightColor := Value;
+    Invalidate;
+  end;
+end;
+
+procedure TMarkDownViewer.SetHighlightColor(const Value: TColor);
+begin
+  if FHighlightColor <> Value then
+  begin
+    FHighlightColor := Value;
     Invalidate;
   end;
 end;

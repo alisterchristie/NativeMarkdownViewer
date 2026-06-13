@@ -141,6 +141,10 @@ type
     procedure ParseInlineParsesEmojiShortcodes;
     [Test]
     procedure TokenMapHandlesEmoji;
+    [Test]
+    procedure ParseInlineParsesHighlight;
+    [Test]
+    procedure TokenMapHandlesHighlight;
   end;
 
 implementation
@@ -1329,6 +1333,52 @@ begin
     Assert.AreEqual(20, Tokens[1].SourceMap[0]);
     Assert.AreEqual(20, Tokens[1].SourceMap[1]);
     Assert.AreEqual(90, Tokens[1].SourceMap[2]);
+  finally
+    Tokens.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.ParseInlineParsesHighlight;
+var
+  Tokens: TMarkDownInlineList;
+begin
+  Tokens := TMarkDownBlockParser.ParseInline('some ==highlighted== text');
+  try
+    Assert.AreEqual(3, Tokens.Count);
+    Assert.AreEqual('some ', Tokens[0].Text);
+    Assert.IsFalse(Tokens[0].IsHighlighted);
+
+    Assert.AreEqual('highlighted', Tokens[1].Text);
+    Assert.IsTrue(Tokens[1].IsHighlighted);
+
+    Assert.AreEqual(' text', Tokens[2].Text);
+    Assert.IsFalse(Tokens[2].IsHighlighted);
+  finally
+    Tokens.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.TokenMapHandlesHighlight;
+var
+  Tokens: TMarkDownInlineList;
+  Map: TArray<Integer>;
+  I: Integer;
+begin
+  SetLength(Map, 10);
+  for I := 0 to 9 do
+    Map[I] := I * 10;
+
+  Tokens := TMarkDownBlockParser.ParseInline('A ==B== C', nil, Map);
+  try
+    Assert.AreEqual(3, Tokens.Count);
+    Assert.AreEqual('A ', Tokens[0].Text);
+    Assert.AreEqual('B', Tokens[1].Text);
+    Assert.AreEqual(' C', Tokens[2].Text);
+
+    Assert.IsTrue(Tokens[1].IsHighlighted);
+    Assert.AreEqual(2, Length(Tokens[1].SourceMap));
+    Assert.AreEqual(40, Tokens[1].SourceMap[0]);
+    Assert.AreEqual(50, Tokens[1].SourceMap[1]);
   finally
     Tokens.Free;
   end;

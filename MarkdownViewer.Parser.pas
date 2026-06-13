@@ -862,7 +862,7 @@ begin
 end;
 
 procedure AddRun(Tokens: TMarkDownInlineList; const Text: string;
-  Style: TFontStyles; IsCode: Boolean; const Url: string;
+  Style: TFontStyles; IsHighlighted: Boolean; IsCode: Boolean; const Url: string;
   const AMap: TArray<Integer>);
 var
   Token: TMarkDownInlineToken;
@@ -872,6 +872,7 @@ begin
   Token := Default(TMarkDownInlineToken);
   Token.Text := Text;
   Token.Style := Style;
+  Token.IsHighlighted := IsHighlighted;
   Token.IsCode := IsCode;
   Token.Url := Url;
   // A map is only attached when it lines up with Text; a mismatch means the
@@ -1146,7 +1147,7 @@ end;
 // so each emitted token can record where its rendered text came from in the
 // source. Sub-spans pass the matching slice of Map down recursively.
 procedure ParseRuns(const Text: string; References: TStrings;
-  BaseStyle: TFontStyles; const BaseUrl: string; Tokens: TMarkDownInlineList;
+  BaseStyle: TFontStyles; IsHighlighted: Boolean; const BaseUrl: string; Tokens: TMarkDownInlineList;
   const Map: TArray<Integer>);
 var
   I: Integer;
@@ -1178,7 +1179,7 @@ var
 
   procedure FlushBuffer;
   begin
-    AddRun(Tokens, Buffer, BaseStyle, False, BaseUrl, CurrentBufferMap);
+    AddRun(Tokens, Buffer, BaseStyle, IsHighlighted, False, BaseUrl, CurrentBufferMap);
     Buffer := '';
     if HasMap then
       BufferMap.Clear;
@@ -1248,7 +1249,7 @@ begin
           if TryGetEmoji(ReferenceName, Decoded) then
           begin
             FlushBuffer;
-            AddRun(Tokens, Decoded, BaseStyle, False, BaseUrl,
+            AddRun(Tokens, Decoded, BaseStyle, IsHighlighted, False, BaseUrl,
               EmojiMap(Map, I - 1, J, Length(Decoded)));
             I := J + 1;
             Continue;
@@ -1259,7 +1260,7 @@ begin
       if TryReadAutoLink(Text, I, LinkText, LinkUrl, NextIndex, DisplayStart) then
       begin
         FlushBuffer;
-        AddRun(Tokens, LinkText, BaseStyle, False, LinkUrl,
+        AddRun(Tokens, LinkText, BaseStyle, IsHighlighted, False, LinkUrl,
           SubMap(Map, DisplayStart - 1, Length(LinkText)));
         I := NextIndex;
         Continue;
@@ -1271,7 +1272,7 @@ begin
         if J > I then
         begin
           FlushBuffer;
-          AddRun(Tokens, Copy(Text, I + 1, J - I - 1), BaseStyle, True, BaseUrl,
+          AddRun(Tokens, Copy(Text, I + 1, J - I - 1), BaseStyle, IsHighlighted, True, BaseUrl,
             SubMap(Map, I, J - I - 1));
           I := J + 1;
           Continue;
@@ -1288,11 +1289,25 @@ begin
           begin
             FlushBuffer;
             ParseRuns(Copy(Text, I + 3, J - I - 3), References,
-              BaseStyle + [fsBold, fsItalic], BaseUrl, Tokens,
+              BaseStyle + [fsBold, fsItalic], IsHighlighted, BaseUrl, Tokens,
               SubMap(Map, I + 2, J - I - 3));
             I := J + 3;
             Continue;
           end;
+        end;
+      end;
+
+      if (Copy(Text, I, 2) = '==') and CanOpenEmphasis(Text, I, 2, False) then
+      begin
+        J := FindUnescaped('==', Text, I + 2);
+        if (J > I + 2) and CanCloseEmphasis(Text, J, 2, False) then
+        begin
+          FlushBuffer;
+          ParseRuns(Copy(Text, I + 2, J - I - 2), References,
+            BaseStyle, True, BaseUrl, Tokens,
+            SubMap(Map, I + 1, J - I - 2));
+          I := J + 2;
+          Continue;
         end;
       end;
 
@@ -1303,7 +1318,7 @@ begin
         begin
           FlushBuffer;
           ParseRuns(Copy(Text, I + 2, J - I - 2), References,
-            BaseStyle + [fsStrikeOut], BaseUrl, Tokens,
+            BaseStyle + [fsStrikeOut], IsHighlighted, BaseUrl, Tokens,
             SubMap(Map, I + 1, J - I - 2));
           I := J + 2;
           Continue;
@@ -1317,7 +1332,7 @@ begin
         begin
           FlushBuffer;
           ParseRuns(Copy(Text, I + 2, J - I - 2), References,
-            BaseStyle + [fsBold], BaseUrl, Tokens,
+            BaseStyle + [fsBold], IsHighlighted, BaseUrl, Tokens,
             SubMap(Map, I + 1, J - I - 2));
           I := J + 2;
           Continue;
@@ -1331,7 +1346,7 @@ begin
         begin
           FlushBuffer;
           ParseRuns(Copy(Text, I + 2, J - I - 2), References,
-            BaseStyle + [fsBold], BaseUrl, Tokens,
+            BaseStyle + [fsBold], IsHighlighted, BaseUrl, Tokens,
             SubMap(Map, I + 1, J - I - 2));
           I := J + 2;
           Continue;
@@ -1346,7 +1361,7 @@ begin
         begin
           FlushBuffer;
           ParseRuns(Copy(Text, I + 1, J - I - 1), References,
-            BaseStyle + [fsItalic], BaseUrl, Tokens,
+            BaseStyle + [fsItalic], IsHighlighted, BaseUrl, Tokens,
             SubMap(Map, I, J - I - 1));
           I := J + 1;
           Continue;
@@ -1364,7 +1379,7 @@ begin
           if K > J then
           begin
             FlushBuffer;
-            ParseRuns(Copy(Text, I + 1, J - I - 1), References, BaseStyle,
+            ParseRuns(Copy(Text, I + 1, J - I - 1), References, BaseStyle, IsHighlighted,
               LinkDestination(Copy(Text, J + 2, K - J - 2)), Tokens,
               SubMap(Map, I, J - I - 1));
             I := K + 1;
@@ -1385,7 +1400,7 @@ begin
             if LinkUrl <> '' then
             begin
               FlushBuffer;
-              ParseRuns(LinkText, References, BaseStyle, LinkUrl, Tokens,
+              ParseRuns(LinkText, References, BaseStyle, IsHighlighted, LinkUrl, Tokens,
                 SubMap(Map, I, J - I - 1));
               I := K + 1;
               Continue;
@@ -1409,7 +1424,7 @@ class function TMarkDownBlockParser.ParseInline(const Text: string;
   References: TStrings; const SourceMap: TArray<Integer>): TMarkDownInlineList;
 begin
   Result := TMarkDownInlineList.Create;
-  ParseRuns(Text, References, [], '', Result, SourceMap);
+  ParseRuns(Text, References, [], False, '', Result, SourceMap);
 end;
 
 end.

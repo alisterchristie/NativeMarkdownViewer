@@ -64,10 +64,11 @@ procedure TMarkdownHtmlTests.InlineStylesEmitTags;
 var
   Html: string;
 begin
-  Html := MarkdownToHtml('a **b** and *c* and ~~d~~');
+  Html := MarkdownToHtml('a **b** and *c* and ~~d~~ and ==e==');
   Assert.IsTrue(Html.Contains('<strong>b</strong>'), Html);
   Assert.IsTrue(Html.Contains('<em>c</em>'), Html);
   Assert.IsTrue(Html.Contains('<del>d</del>'), Html);
+  Assert.IsTrue(Html.Contains('<mark>e</mark>'), Html);
 end;
 
 procedure TMarkdownHtmlTests.LinkEmitsAnchor;

@@ -46,6 +46,8 @@ begin
     Result := '<em>' + Result + '</em>';
   if fsBold in Token.Style then
     Result := '<strong>' + Result + '</strong>';
+  if Token.IsHighlighted then
+    Result := '<mark>' + Result + '</mark>';
   if Token.Url <> '' then
     Result := '<a href="' + HtmlEscape(Token.Url) + '">' + Result + '</a>';
 end;
