@@ -130,6 +130,10 @@ type
     [Test]
     procedure DirectEditingArrowSkipsLineBreakPair;
     [Test]
+    procedure DirectEditingEnterRestsCaretOnBlankLine;
+    [Test]
+    procedure DirectEditingCaretCanRestBetweenParagraphs;
+    [Test]
     procedure TabConvertsParagraphToHeading;
     [Test]
     procedure TabIncreasesHeadingLevel;
@@ -901,13 +905,21 @@ begin
   end;
   RepaintViewer;
 
+  // Repaint between key presses the way the real message loop does, so the
+  // scroll tracks the caret instead of accumulating an over-scroll from stale
+  // layout (which would otherwise leave the caret off-screen).
   for I := 1 to 30 do
+  begin
     FViewer.PressKey(VK_DOWN);
+    RepaintViewer;
+  end;
   SavedScrollPos := FViewer.ScrollPosition;
   Assert.IsTrue(SavedScrollPos > 0,
     'expected caret movement to scroll the view');
 
+  // Typing where the caret already sits must not jump the view.
   FViewer.TypeCharacter('X');
+  RepaintViewer;
   Assert.AreEqual(SavedScrollPos, FViewer.ScrollPosition);
 end;
 
@@ -956,11 +968,15 @@ begin
   FViewer.MarkdownText := '# first' + sLineBreak + sLineBreak + '# second';
   RepaintViewer;
 
+  // When editing, the empty line between the headings is its own caret stop, so
+  // reaching the second heading takes two Down presses.
+  FViewer.PressKey(VK_DOWN);
   FViewer.PressKey(VK_DOWN);
   FViewer.TypeCharacter('X');
   Assert.IsTrue(FViewer.MarkdownText.Contains(sLineBreak + sLineBreak + '# Xsecond'),
     FViewer.MarkdownText);
 
+  FViewer.PressKey(VK_UP);
   FViewer.PressKey(VK_UP);
   FViewer.TypeCharacter('Y');
   Assert.IsTrue(Pos('Y', Copy(FViewer.MarkdownText, 1,
@@ -1073,7 +1089,12 @@ begin
   FViewer.MarkdownText := '# alpha' + sLineBreak + sLineBreak + '# bravo';
   RepaintViewer;
 
+  // Down lands on the empty line first, then on the second heading. The first
+  // backspace removes the blank line (and the heading marker); the second joins
+  // the now-adjacent blocks.
   FViewer.PressKey(VK_DOWN);
+  FViewer.PressKey(VK_DOWN);
+  FViewer.PressKey(VK_BACK);
   FViewer.PressKey(VK_BACK);
 
   Assert.IsFalse(FViewer.MarkdownText.Contains(sLineBreak + sLineBreak),
@@ -1088,12 +1109,47 @@ begin
   FViewer.MarkdownText := '# alpha' + sLineBreak + sLineBreak + '# bravo';
   RepaintViewer;
 
+  // Each Right press crosses one CRLF pair without stopping between the CR and
+  // LF; the empty line between the headings is one such stop along the way.
   FViewer.PressKey(VK_END);
+  FViewer.PressKey(VK_RIGHT);
   FViewer.PressKey(VK_RIGHT);
   FViewer.TypeCharacter('X');
 
   Assert.IsTrue(FViewer.MarkdownText.Contains('# Xbravo'),
     FViewer.MarkdownText);
+end;
+
+procedure TMarkDownViewerTests.DirectEditingEnterRestsCaretOnBlankLine;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'Hello';
+  RepaintViewer;
+
+  // Press Enter at the end of the line, then type: the caret must rest on the
+  // newly created blank line so the text lands on its own line, not be pushed
+  // onto the following non-blank line.
+  FViewer.PressKey(VK_END);
+  FViewer.TypeCharacter(#13);
+  FViewer.TypeCharacter('X');
+
+  Assert.IsTrue(FViewer.MarkdownText.Contains('Hello' + sLineBreak + 'X'),
+    FViewer.MarkdownText);
+end;
+
+procedure TMarkDownViewerTests.DirectEditingCaretCanRestBetweenParagraphs;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'one' + sLineBreak + sLineBreak + 'two';
+  RepaintViewer;
+
+  // Down from the first paragraph lands on the empty separating line, and
+  // typing there keeps it a distinct blank-line edit between the paragraphs.
+  FViewer.PressKey(VK_DOWN);
+  FViewer.TypeCharacter('M');
+
+  Assert.IsTrue(FViewer.MarkdownText.Contains(
+    'one' + sLineBreak + 'M' + sLineBreak + 'two'), FViewer.MarkdownText);
 end;
 
 procedure TMarkDownViewerTests.TabConvertsParagraphToHeading;

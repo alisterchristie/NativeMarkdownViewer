@@ -181,6 +181,9 @@ type
     function DrawTable(const TableText: string; ALeft, ATop, AWidth: Integer;
       const ABlockSourceMap: TArray<Integer>): Integer;
     function DrawBlocks(TextLeft, ContentWidth, Y: Integer): Integer;
+    function BlockEndSourceLine(ABlock: TMarkDownBlock): Integer;
+    function DrawEditableBlankLine(TextLeft, ContentWidth, Y,
+      ALineIdx: Integer): Integer;
     procedure ClearSelection;
     procedure ClearInlineTokenCaches;
     procedure CopySelectionToClipboard(PlainText: Boolean);
@@ -3095,14 +3098,26 @@ var
   StartPos: Integer;
   EndPos: Integer;
   SubText: string;
+  NextSourceLine: Integer;
 begin
   Blocks := FBlocks;
   FLastBlockTop := Y;
+  NextSourceLine := 0;
   for I := 0 to Blocks.Count - 1 do
   begin
+    Block := Blocks[I];
+    // When editing, blank source lines between blocks are rendered as empty,
+    // cursor-addressable lines (read-only preview keeps them collapsed).
+    if not FReadOnly then
+      while NextSourceLine < Block.SourceStartLine do
+      begin
+        if (NextSourceLine < FMarkdown.Count) and
+          (Trim(FMarkdown[NextSourceLine]) = '') then
+          Y := DrawEditableBlankLine(TextLeft, ContentWidth, Y, NextSourceLine);
+        Inc(NextSourceLine);
+      end;
     if I = Blocks.Count - 1 then
       FLastBlockTop := Y;
-    Block := Blocks[I];
     Block.LayoutTop := Y + FScrollPos;
     case Block.Kind of
       bkHeading:
@@ -3316,8 +3331,53 @@ begin
       // source character (the source map's end sentinel).
       AddSelectableBreak(True,
         SliceMapValue(Block.SourceMap, Length(Block.SourceMap) - 1));
+    if not FReadOnly then
+      NextSourceLine := Max(NextSourceLine, BlockEndSourceLine(Block) + 1);
   end;
+  // Trailing blank lines (e.g. the empty line left by pressing Enter at the end
+  // of the document) get their own addressable slot when editing.
+  if not FReadOnly then
+    while NextSourceLine < FMarkdown.Count do
+    begin
+      if Trim(FMarkdown[NextSourceLine]) = '' then
+        Y := DrawEditableBlankLine(TextLeft, ContentWidth, Y, NextSourceLine);
+      Inc(NextSourceLine);
+    end;
   Result := Y;
+end;
+
+// The last source line a block occupies, derived from its source map's end
+// sentinel (the offset just past the block's final source character). Falls
+// back to the start line for blocks that carry no mappable text.
+function TMarkDownViewer.BlockEndSourceLine(ABlock: TMarkDownBlock): Integer;
+begin
+  if Length(ABlock.SourceMap) > 0 then
+    Result := SourcePosToLine(
+      SliceMapValue(ABlock.SourceMap, Length(ABlock.SourceMap) - 1))
+  else
+    Result := ABlock.SourceStartLine;
+  Result := Max(Result, ABlock.SourceStartLine);
+end;
+
+// Render one blank source line as an empty, cursor-addressable line: a
+// zero-width layout anchor for the caret plus a forced (non-collapsing)
+// selectable break mapped to the line's source position.
+function TMarkDownViewer.DrawEditableBlankLine(TextLeft, ContentWidth, Y,
+  ALineIdx: Integer): Integer;
+var
+  EmptyTokens: TMarkDownInlineList;
+  TokenHeight: Integer;
+begin
+  AssignBaseFont([], 0);
+  EmptyTokens := TMarkDownInlineList.Create;
+  try
+    TokenHeight := DrawInline(EmptyTokens, TextLeft, Y, ContentWidth, True,
+      [], 0, taLeftJustify, '', True);
+  finally
+    EmptyTokens.Free;
+  end;
+  Result := Y + TokenHeight;
+  AddSelectableBreak(True, LineStartSourcePos(ALineIdx), True);
 end;
 
 procedure TMarkDownViewer.Paint;
