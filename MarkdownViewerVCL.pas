@@ -103,6 +103,7 @@ type
     function TableAlignmentFromCell(const Cell: string): TAlignment;
     function DrawTable(const TableText: string; ALeft, ATop, AWidth: Integer;
       const ABlockSourceMap: TArray<Integer>): Integer;
+    function DrawBlocks(TextLeft, ContentWidth, Y: Integer): Integer;
     procedure ClearSelection;
     procedure ClearInlineTokenCaches;
     procedure CopySelectionToClipboard(PlainText: Boolean);
@@ -2653,15 +2654,11 @@ function TMarkDownViewer.DrawTable(const TableText: string; ALeft, ATop, AWidth:
     end;
   end;
 
-procedure TMarkDownViewer.Paint;
+function TMarkDownViewer.DrawBlocks(TextLeft, ContentWidth, Y: Integer): Integer;
 var
   Blocks: TMarkDownBlockList;
   I: Integer;
-  Y: Integer;
-  TextLeft: Integer;
-  ContentWidth: Integer;
   LineHeight: Integer;
-  TotalHeight: Integer;
   TokenHeight: Integer;
   Tokens: TMarkDownInlineList;
   Block: TMarkDownBlock;
@@ -2679,23 +2676,9 @@ var
   TextIndent: Integer;
   LineTextStart: Integer;
   OldBkMode: Integer;
-
 begin
-  Canvas.Brush.Color := GetEffectiveBackground;
-  Canvas.FillRect(ClientRect);
-
-  FLinkHits.Clear;
-  FTaskHits.Clear;
-  FTextRuns.Clear;
-  FCopyChunks.Clear;
-  FSelectableText := '';
-
   Blocks := FBlocks;
-  Y := MarkdownPadding - FScrollPos;
   FLastBlockTop := Y;
-  TextLeft := MarkdownPadding;
-  ContentWidth := Max(10, ClientWidth - (MarkdownPadding * 2) - GetSystemMetrics(SM_CXVSCROLL));
-
   for I := 0 to Blocks.Count - 1 do
   begin
     if I = Blocks.Count - 1 then
@@ -2882,6 +2865,28 @@ begin
       AddSelectableBreak(True,
         SliceMapValue(Block.SourceMap, Length(Block.SourceMap) - 1));
   end;
+  Result := Y;
+end;
+
+procedure TMarkDownViewer.Paint;
+var
+  Y: Integer;
+  TextLeft: Integer;
+  ContentWidth: Integer;
+  TotalHeight: Integer;
+begin
+  Canvas.Brush.Color := GetEffectiveBackground;
+  Canvas.FillRect(ClientRect);
+
+  FLinkHits.Clear;
+  FTaskHits.Clear;
+  FTextRuns.Clear;
+  FCopyChunks.Clear;
+  FSelectableText := '';
+
+  TextLeft := MarkdownPadding;
+  ContentWidth := Max(10, ClientWidth - (MarkdownPadding * 2) - GetSystemMetrics(SM_CXVSCROLL));
+  Y := DrawBlocks(TextLeft, ContentWidth, MarkdownPadding - FScrollPos);
 
   TotalHeight := Y + FScrollPos + MarkdownPadding;
   if TotalHeight <> FContentHeight then
