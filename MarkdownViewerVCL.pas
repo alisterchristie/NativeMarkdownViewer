@@ -1,4 +1,4 @@
-﻿unit MarkdownViewerVCL;
+unit MarkdownViewerVCL;
 
 interface
 
@@ -91,6 +91,11 @@ type
       const FontName: string = '');
     procedure AssignInlineFont(const Token: TMarkDownInlineToken;
       BaseStyle: TFontStyles; SizeDelta: Integer);
+    function DrawInline(ATokens: TMarkDownInlineList;
+      ALeft, ATop, AWidth: Integer; ADraw: Boolean; BaseStyle: TFontStyles = [];
+      SizeDelta: Integer = 0; AAlignment: TAlignment = taLeftJustify;
+      const AMarkdownLinePrefix: string = '';
+      AEmitAnchor: Boolean = False): Integer;
     procedure ClearSelection;
     procedure ClearInlineTokenCaches;
     procedure CopySelectionToClipboard(PlainText: Boolean);
@@ -2183,45 +2188,10 @@ begin
     Canvas.Font.Color := GetEffectiveTextColor;
 end;
 
-procedure TMarkDownViewer.Paint;
-var
-  Blocks: TMarkDownBlockList;
-  I: Integer;
-  Y: Integer;
-  TextLeft: Integer;
-  ContentWidth: Integer;
-  LineHeight: Integer;
-  TotalHeight: Integer;
-  TokenHeight: Integer;
-  Tokens: TMarkDownInlineList;
-  Block: TMarkDownBlock;
-  Lines: TStringList;
-  LineIndex: Integer;
-  CodePos: Integer;
-  R: TRect;
-  CheckRect: TRect;
-  TaskHit: TMarkDownTaskHit;
-  CanvasState: TCanvasState;
-  Bullet: string;
-  ListMarker: string;
-  ListLeft: Integer;
-  MarkerLeft: Integer;
-  TextIndent: Integer;
-  LineTextStart: Integer;
-  OldBkMode: Integer;
-
-  function InlineTokensForBlock(ABlock: TMarkDownBlock): TMarkDownInlineList;
-  begin
-    if ABlock.InlineTokens = nil then
-      ABlock.InlineTokens := TMarkDownBlockParser.ParseInline(ABlock.Text,
-        FLinkReferences, ABlock.SourceMap);
-    Result := ABlock.InlineTokens;
-  end;
-
-  function DrawInline(ATokens: TMarkDownInlineList; ALeft, ATop, AWidth: Integer; ADraw: Boolean;
-    BaseStyle: TFontStyles = []; SizeDelta: Integer = 0;
-    AAlignment: TAlignment = taLeftJustify; const AMarkdownLinePrefix: string = '';
-    AEmitAnchor: Boolean = False): Integer;
+function TMarkDownViewer.DrawInline(ATokens: TMarkDownInlineList;
+  ALeft, ATop, AWidth: Integer; ADraw: Boolean; BaseStyle: TFontStyles;
+  SizeDelta: Integer; AAlignment: TAlignment;
+  const AMarkdownLinePrefix: string; AEmitAnchor: Boolean): Integer;
   var
     TokenIndex: Integer;
     AtomIndex: Integer;
@@ -2231,6 +2201,7 @@ var
     YPos: Integer;
     StartLen: Integer;
     AnchorRun: TMarkDownTextRun;
+    LineHeight: Integer;
     Atom: string;
     AtomWidth: Integer;
     AtomRect: TRect;
@@ -2410,6 +2381,41 @@ var
     end;
 
     Result := YPos + LineHeight - ATop;
+  end;
+
+procedure TMarkDownViewer.Paint;
+var
+  Blocks: TMarkDownBlockList;
+  I: Integer;
+  Y: Integer;
+  TextLeft: Integer;
+  ContentWidth: Integer;
+  LineHeight: Integer;
+  TotalHeight: Integer;
+  TokenHeight: Integer;
+  Tokens: TMarkDownInlineList;
+  Block: TMarkDownBlock;
+  Lines: TStringList;
+  LineIndex: Integer;
+  CodePos: Integer;
+  R: TRect;
+  CheckRect: TRect;
+  TaskHit: TMarkDownTaskHit;
+  CanvasState: TCanvasState;
+  Bullet: string;
+  ListMarker: string;
+  ListLeft: Integer;
+  MarkerLeft: Integer;
+  TextIndent: Integer;
+  LineTextStart: Integer;
+  OldBkMode: Integer;
+
+  function InlineTokensForBlock(ABlock: TMarkDownBlock): TMarkDownInlineList;
+  begin
+    if ABlock.InlineTokens = nil then
+      ABlock.InlineTokens := TMarkDownBlockParser.ParseInline(ABlock.Text,
+        FLinkReferences, ABlock.SourceMap);
+    Result := ABlock.InlineTokens;
   end;
 
   function ResolveImagePath(const Url: string): string;
