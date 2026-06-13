@@ -1248,8 +1248,15 @@ const
     'def f(): return "x" # comment',
     '<div class="a">Hi &amp; bye</div>',
     '{ "k": [1, 2.5, true, null], "s": "v" }',
-    'key: value # c'#13#10'- item',
-    'object F: TForm'#13#10'  Caption = ''Hi'''#13#10'end');
+    '''
+    key: value # c
+    - item
+    ''',
+    '''
+    object F: TForm
+      Caption = 'Hi'
+    end
+    ''');
 var
   L, S: Integer;
   HL: IMarkdownSyntaxHighlighter;
@@ -1321,7 +1328,12 @@ begin
   try
     Block.Kind := bkCodeBlock;
     Block.CodeLanguage := 'pascal';
-    Block.Text := 'begin'#13#10'  WriteLn(''Hi'');'#13#10'end';
+    Block.Text :=
+      '''
+      begin
+        WriteLn('Hi');
+      end
+      ''';
 
     HL := TMarkdownSyntaxHighlighterRegistry.GetHighlighter('pascal');
     Direct := HL.Highlight(Block.Text);

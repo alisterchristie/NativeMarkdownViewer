@@ -1,4 +1,4 @@
-﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
     <PropertyGroup>
         <ProjectGuid>{E7864E6A-6D66-4943-86A0-90413A799491}</ProjectGuid>
         <MainSource>KaiMarkdownViewer.dpk</MainSource>
@@ -132,6 +132,7 @@
         <DCCReference Include="MarkdownViewer.Parser.pas"/>
         <DCCReference Include="MarkdownViewer.Renderer.pas"/>
         <DCCReference Include="MarkdownViewer.Highlight.pas"/>
+        <DCCReference Include="MarkdownViewer.Html.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>
