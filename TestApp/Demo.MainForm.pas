@@ -205,9 +205,12 @@ If the image path is missing or remote, the viewer displays the alt text instead
 
 ## Code blocks
 
-Fenced code renders in the configurable code font (`CodeFontName`):
+Fenced code renders in the configurable code font (`CodeFontName`), with syntax
+highlighting for over 20 languages.
 
-```
+### Delphi / Pascal
+
+```pascal
 var
   Viewer: TMarkDownViewer;
 begin
@@ -216,6 +219,273 @@ begin
   Viewer.Align := alClient;
   Viewer.MarkdownText := '# Hello, **markdown**';
 end;
+```
+
+### C
+
+```c
+#include <stdio.h>
+#define MAX 100
+
+int main(void) {
+    for (int i = 0; i < MAX; i++) {
+        if (i % 2 == 0) printf("%d\n", i);
+    }
+    return 0;
+}
+```
+
+### C++
+
+```cpp
+#include <vector>
+#include <string>
+
+class Greeter {
+    std::string name;
+public:
+    explicit Greeter(std::string n) : name(std::move(n)) {}
+    auto greet() const -> std::string {
+        return "Hello, " + name + "!";
+    }
+};
+```
+
+### C#
+
+```cs
+using System;
+using System.Threading.Tasks;
+
+record Person(string Name, int Age);
+
+class Program {
+    static async Task Main() {
+        var p = new Person("Alice", 30);
+        Console.WriteLine(p);
+    }
+}
+```
+
+### Java
+
+```java
+import java.util.stream.*;
+
+public class Demo {
+    public static void main(String[] args) {
+        var nums = IntStream.range(1, 10)
+            .filter(n -> n % 2 == 0)
+            .boxed().toList();
+        System.out.println(nums);
+    }
+}
+```
+
+### JavaScript
+
+```js
+const greet = (name) => {
+  const msg = `Hello, ${name}!`;
+  console.log(msg);
+  return { name, msg };
+};
+greet("World");
+```
+
+### TypeScript
+
+```ts
+interface User {
+  name: string;
+  readonly id: number;
+}
+
+async function fetchUser(id: number): Promise<User> {
+  const res = await fetch(`/api/user/${id}`);
+  return res.json() as Promise<User>;
+}
+```
+
+### Python
+
+```python
+import json
+
+def process(items: list[int]) -> dict[str, int]:
+    """Group items by parity."""
+    return {
+        "even": sum(1 for i in items if i % 2 == 0),
+        "odd": sum(1 for i in items if i % 2 != 0),
+    }
+
+print(process([1, 2, 3, 4, 5]))
+```
+
+### Ruby
+
+```ruby
+class User
+  attr_accessor :name
+
+  def initialize(name:)
+    @name = name
+  end
+
+  def greet
+    "Hello, #{@name}!"
+  end
+end
+
+puts User.new(name: "Alice").greet
+```
+
+### Go
+
+```go
+package main
+
+import (
+    "fmt"
+    "strings"
+)
+
+func shout(s string) string {
+    return strings.ToUpper(s)
+}
+
+func main() {
+    fmt.Println(shout("hello"))
+}
+```
+
+### Rust
+
+```rust
+fn factorial(n: u64) -> u64 {
+    match n {
+        0 | 1 => 1,
+        _     => n * factorial(n - 1),
+    }
+}
+
+fn main() {
+    println!("5! = {}", factorial(5));
+}
+```
+
+### PHP
+
+```php
+<?php
+
+function greet(string $name): string {
+    return "Hello, " . htmlspecialchars($name) . "!";
+}
+
+echo greet("<World>");
+```
+
+### SQL
+
+```sql
+SELECT u.name, COUNT(o.id) AS order_count
+FROM users u
+LEFT JOIN orders o ON u.id = o.user_id
+WHERE u.active = 1
+GROUP BY u.name
+HAVING COUNT(o.id) > 5
+ORDER BY order_count DESC;
+```
+
+### JSON
+
+```json
+{
+    "name": "my-app",
+    "version": "1.0.0",
+    "dependencies": {
+        "react": "^18.0"
+    },
+    "debug": true,
+    "count": 42
+}
+```
+
+### YAML
+
+```yaml
+server:
+  host: 0.0.0.0
+  port: 8080
+
+database:
+  driver: postgresql
+  pool: 10
+
+logging:
+  level: debug
+```
+
+### Shell / Bash
+
+```sh
+#!/bin/bash
+# Backup script
+
+SRC="$HOME/docs"
+DST="/backup/$(date +%Y%m%d)"
+
+if [ -d "$SRC" ]; then
+    echo "Backing up $SRC to $DST"
+    cp -r "$SRC" "$DST"
+else
+    echo "Source not found" >&2
+    exit 1
+fi
+```
+
+### HTML
+
+```html
+<!DOCTYPE html>
+<html>
+<head><title>Demo</title></head>
+<body>
+    <div class="container">
+        <h1>TMarkDownViewer</h1>
+        <p>Native VCL component.</p>
+    </div>
+</body>
+</html>
+```
+
+### CSS
+
+```css
+.container {
+    display: flex;
+    justify-content: center;
+    margin: 16px;
+}
+
+.title {
+    font-size: 24px;
+    color: #333;
+}
+```
+
+### INI / Config
+
+```ini
+; Application settings
+[Server]
+Host=localhost
+Port=8080
+
+[Database]
+Driver=PostgreSQL
+ConnectionString=host=db.local;port=5432
 ```
 
 ---

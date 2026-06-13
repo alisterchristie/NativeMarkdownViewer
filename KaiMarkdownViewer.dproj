@@ -131,6 +131,7 @@
         <DCCReference Include="MarkdownViewer.Model.pas"/>
         <DCCReference Include="MarkdownViewer.Parser.pas"/>
         <DCCReference Include="MarkdownViewer.Renderer.pas"/>
+        <DCCReference Include="MarkdownViewer.Highlight.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

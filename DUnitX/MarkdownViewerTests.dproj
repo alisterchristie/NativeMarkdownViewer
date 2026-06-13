@@ -74,6 +74,7 @@
         <VerInfo_Locale>5129</VerInfo_Locale>
         <Manifest_File>(None)</Manifest_File>
         <AppDPIAwarenessMode>none</AppDPIAwarenessMode>
+        <Debugger_RunParams>--exit:Pause</Debugger_RunParams>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_2)'!=''">
         <DCC_LocalDebugSymbols>false</DCC_LocalDebugSymbols>
@@ -88,14 +89,18 @@
         <DCCReference Include="Test.MarkdownViewer.Model.pas"/>
         <DCCReference Include="Test.MarkdownViewer.Parser.pas"/>
         <DCCReference Include="Test.MarkdownViewer.Renderer.pas"/>
+        <DCCReference Include="Test.MarkdownViewer.Html.pas"/>
         <DCCReference Include="Test.MarkdownViewerVCL.pas"/>
         <DCCReference Include="Test.Demo.MainForm.pas"/>
+        <DCCReference Include="Test.MarkdownViewer.Highlight.pas"/>
         <DCCReference Include="..\TestApp\Demo.MainForm.pas">
             <Form>MainForm</Form>
         </DCCReference>
         <DCCReference Include="..\MarkdownViewer.Model.pas"/>
         <DCCReference Include="..\MarkdownViewer.Parser.pas"/>
         <DCCReference Include="..\MarkdownViewer.Renderer.pas"/>
+        <DCCReference Include="..\MarkdownViewer.Html.pas"/>
+        <DCCReference Include="..\MarkdownViewer.Highlight.pas"/>
         <DCCReference Include="..\MarkdownViewerVCL.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
