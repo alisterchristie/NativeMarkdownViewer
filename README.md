@@ -58,6 +58,10 @@ Supported rendering includes:
 - Read the current selection as markdown or plain text via `SelectedText`
 - Case-insensitive find highlighting with next/previous navigation
 - Configurable code font (`CodeFontName`, monospace fallback)
+- Highlight syntax using double equals (`==highlighted==`)
+- Superscript (`^sup^`) and subscript (`~sub~`) spans
+- Common emoji shortcode parsing (e.g. `:smile:`, `:warning:`)
+- Floating clipboard "Copy" button when hovering code blocks
 - Incremental streaming with tail-only block parsing
 - Optional in-place editing of the rendered markdown source
 - Undo and redo of edits
@@ -67,6 +71,25 @@ Strikethrough uses double tildes:
 
 ```markdown
 This is ~~no longer current~~.
+```
+
+Highlighting uses double equals:
+
+```markdown
+This is ==highlighted== text.
+```
+
+Superscript uses carats, and subscript uses tildes:
+
+```markdown
+Here is a formula: E = mc^2^.
+Water is H~2~O.
+```
+
+Emoji shortcodes are parsed automatically:
+
+```markdown
+This is a success :check: and a warning :warning:.
 ```
 
 Inline emphasis nests, so a span can carry more than one style, and link text

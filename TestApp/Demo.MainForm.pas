@@ -152,9 +152,11 @@ This is a native **VCL** markdown viewer component. It paints markdown text dire
 
 ## Inline formatting
 
-- **Bold**, *italic*, ***bold italic***, and ~~strikethrough~~ spans
+- **Bold**, *italic*, ***bold italic***, ~~strikethrough~~, and ==highlighted== spans
+- Superscript (`^sup^`): e.g. E = mc^2^ and subscript (`~sub~`): e.g. H~2~O
+- Emoji shortcodes are parsed: :smile: :warning: :check: :heart: :rocket: :fire:
 - Nested styles such as **bold with an *italic* word** and a [**bold link**](https://www.embarcadero.com/)
-- Escaped characters remain literal: \*not italic\*, \[not a link\], and \`not code\`
+- Escaped characters remain literal: \*not italic\*, \[not a link\], \`not code\`, and \^not superscript\^
 - Hard line breaks: this line ends with two spaces
   so it continues on the next line in the same paragraph.
 

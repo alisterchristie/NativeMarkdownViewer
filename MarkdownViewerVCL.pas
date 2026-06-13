@@ -117,9 +117,21 @@ type
     FUndoStack: TStringList;
     FRedoStack: TStringList;
     FApplyingEdit: Boolean;
+    FHoveredCodeBlock: TMarkDownBlock;
+    FHoveredCopyButton: Boolean;
+    FCopiedTicks: Cardinal;
+    FCopiedBlock: TMarkDownBlock;
     FOnChange: TNotifyEvent;
     FOnLinkClick: TMarkDownLinkClickEvent;
     FOnScroll: TNotifyEvent;
+    function GetCodeBlockRect(ABlock: TMarkDownBlock): TRect; overload;
+    function GetCodeBlockCopyBtnRect(ABlock: TMarkDownBlock): TRect; overload;
+    function GetEffectiveCodeButtonColor: TColor;
+    function GetEffectiveCodeButtonHoverColor: TColor;
+    function GetEffectiveCodeButtonBorderColor: TColor;
+    function GetEffectiveCodeButtonHoverBorderColor: TColor;
+    function GetEffectiveCodeButtonTextColor: TColor;
+    function GetEffectiveCodeButtonHoverTextColor: TColor;
     procedure SetSyntaxColors(Value: TMarkdownSyntaxColors);
     function IsBackgroundDark: Boolean;
     function GetEffectivePlainColor: TColor;
@@ -256,6 +268,8 @@ type
     procedure WMMouseWheel(var Message: TWMMouseWheel); message WM_MOUSEWHEEL;
     procedure CMFontChanged(var Message: TMessage); message CM_FONTCHANGED;
     procedure CMStyleChanged(var Message: TMessage); message CM_STYLECHANGED;
+    procedure WMTimer(var Message: TWMTimer); message WM_TIMER;
+    procedure CMMouseLeave(var Message: TMessage); message CM_MOUSELEAVE;
   protected
     procedure CreateParams(var Params: TCreateParams); override;
     procedure KeyDown(var Key: Word; Shift: TShiftState); override;
@@ -267,6 +281,10 @@ type
     procedure Paint; override;
     procedure Resize; override;
     procedure SetStyleElements(const Value: TStyleElements); override;
+    function GetCodeBlockCount: Integer;
+    function GetCodeBlockRect(Index: Integer): TRect; overload;
+    function GetCodeBlockCopyBtnRect(Index: Integer): TRect; overload;
+    function IsCopyButtonHovered: Boolean;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -456,10 +474,16 @@ begin
   FReadOnly := True;
   StyleElements := [seFont, seClient];
   Font.Size := 10;
+  FHoveredCodeBlock := nil;
+  FHoveredCopyButton := False;
+  FCopiedTicks := 0;
+  FCopiedBlock := nil;
 end;
 
 destructor TMarkDownViewer.Destroy;
 begin
+  if HandleAllocated then
+    KillTimer(Handle, 1);
   FRedoStack.Free;
   FUndoStack.Free;
   FImageAges.Free;
@@ -2212,6 +2236,168 @@ begin
     FOnChange(Self);
 end;
 
+function TMarkDownViewer.GetCodeBlockRect(ABlock: TMarkDownBlock): TRect;
+var
+  ContentWidth: Integer;
+begin
+  ContentWidth := Max(10, ClientWidth - (MarkdownPadding * 2) - GetSystemMetrics(SM_CXVSCROLL));
+  Result := Rect(
+    MarkdownPadding,
+    ABlock.LayoutTop - FScrollPos + 2,
+    MarkdownPadding + ContentWidth,
+    ABlock.LayoutTop - FScrollPos + ABlock.LayoutHeight - ParagraphSpacing
+  );
+end;
+
+function TMarkDownViewer.GetCodeBlockCopyBtnRect(ABlock: TMarkDownBlock): TRect;
+var
+  BlockRect: TRect;
+  BtnWidth, BtnHeight: Integer;
+  BtnText: string;
+  SavedFont: TFont;
+begin
+  BlockRect := GetCodeBlockRect(ABlock);
+  
+  SavedFont := TFont.Create;
+  try
+    SavedFont.Assign(Canvas.Font);
+    Canvas.Font.Assign(Font);
+    Canvas.Font.Size := 8;
+    Canvas.Font.Style := [];
+    
+    BtnText := 'Copy';
+    if (FCopiedBlock = ABlock) and (GetTickCount - FCopiedTicks < 1500) then
+      BtnText := 'Copied!';
+      
+    BtnWidth := Canvas.TextWidth(BtnText) + 12;
+    BtnHeight := Canvas.TextHeight(BtnText) + 6;
+    
+    Result := Rect(
+      BlockRect.Right - BtnWidth - 6,
+      BlockRect.Top + 6,
+      BlockRect.Right - 6,
+      BlockRect.Top + 6 + BtnHeight
+    );
+  finally
+    Canvas.Font.Assign(SavedFont);
+    SavedFont.Free;
+  end;
+end;
+
+function TMarkDownViewer.GetEffectiveCodeButtonColor: TColor;
+begin
+  if IsBackgroundDark then
+    Result := RGB(60, 60, 60)
+  else
+    Result := RGB(240, 240, 240);
+end;
+
+function TMarkDownViewer.GetEffectiveCodeButtonHoverColor: TColor;
+begin
+  if IsBackgroundDark then
+    Result := RGB(80, 80, 80)
+  else
+    Result := RGB(220, 220, 220);
+end;
+
+function TMarkDownViewer.GetEffectiveCodeButtonBorderColor: TColor;
+begin
+  if IsBackgroundDark then
+    Result := RGB(80, 80, 80)
+  else
+    Result := RGB(200, 200, 200);
+end;
+
+function TMarkDownViewer.GetEffectiveCodeButtonHoverBorderColor: TColor;
+begin
+  if IsBackgroundDark then
+    Result := RGB(100, 100, 100)
+  else
+    Result := RGB(170, 170, 170);
+end;
+
+function TMarkDownViewer.GetEffectiveCodeButtonTextColor: TColor;
+begin
+  if IsBackgroundDark then
+    Result := RGB(180, 180, 180)
+  else
+    Result := RGB(100, 100, 100);
+end;
+
+function TMarkDownViewer.GetEffectiveCodeButtonHoverTextColor: TColor;
+begin
+  if IsBackgroundDark then
+    Result := RGB(240, 240, 240)
+  else
+    Result := RGB(60, 60, 60);
+end;
+
+function TMarkDownViewer.GetCodeBlockCount: Integer;
+var
+  I: Integer;
+begin
+  Result := 0;
+  for I := 0 to FBlocks.Count - 1 do
+    if FBlocks[I].Kind = bkCodeBlock then
+      Inc(Result);
+end;
+
+function TMarkDownViewer.GetCodeBlockRect(Index: Integer): TRect;
+var
+  I, Count: Integer;
+begin
+  Count := 0;
+  for I := 0 to FBlocks.Count - 1 do
+    if FBlocks[I].Kind = bkCodeBlock then
+    begin
+      if Count = Index then
+        Exit(GetCodeBlockRect(FBlocks[I]));
+      Inc(Count);
+    end;
+  Result := Rect(0, 0, 0, 0);
+end;
+
+function TMarkDownViewer.GetCodeBlockCopyBtnRect(Index: Integer): TRect;
+var
+  I, Count: Integer;
+begin
+  Count := 0;
+  for I := 0 to FBlocks.Count - 1 do
+    if FBlocks[I].Kind = bkCodeBlock then
+    begin
+      if Count = Index then
+        Exit(GetCodeBlockCopyBtnRect(FBlocks[I]));
+      Inc(Count);
+    end;
+  Result := Rect(0, 0, 0, 0);
+end;
+
+function TMarkDownViewer.IsCopyButtonHovered: Boolean;
+begin
+  Result := FHoveredCopyButton;
+end;
+
+procedure TMarkDownViewer.WMTimer(var Message: TWMTimer);
+begin
+  if Message.TimerID = 1 then
+  begin
+    if HandleAllocated then
+      KillTimer(Handle, 1);
+    Invalidate;
+  end;
+end;
+
+procedure TMarkDownViewer.CMMouseLeave(var Message: TMessage);
+begin
+  inherited;
+  if (FHoveredCodeBlock <> nil) or FHoveredCopyButton then
+  begin
+    FHoveredCodeBlock := nil;
+    FHoveredCopyButton := False;
+    Invalidate;
+  end;
+end;
+
 procedure TMarkDownViewer.MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
 var
   Position: Integer;
@@ -2221,6 +2407,12 @@ begin
     SetFocus;
   if Button <> mbLeft then
     Exit;
+
+  if (FHoveredCodeBlock <> nil) and FHoveredCopyButton then
+  begin
+    FSelecting := False;
+    Exit;
+  end;
 
   Position := HitTestTextPosition(X, Y);
   FDesiredCaretX := -1;
@@ -2237,6 +2429,10 @@ var
   I: Integer;
   IsLink: Boolean;
   IsTaskBox: Boolean;
+  NewHoveredBlock: TMarkDownBlock;
+  NewHoveredBtn: Boolean;
+  R: TRect;
+  BtnRect: TRect;
 begin
   inherited;
   if FSelecting then
@@ -2246,6 +2442,31 @@ begin
     else if Y > ClientHeight then
       SetScrollPosition(FScrollPos + (Y - ClientHeight));
     FSelectionCaret := HitTestTextPosition(X, Y);
+    Invalidate;
+  end;
+
+  NewHoveredBlock := nil;
+  NewHoveredBtn := False;
+  for I := 0 to FBlocks.Count - 1 do
+  begin
+    if FBlocks[I].Kind = bkCodeBlock then
+    begin
+      R := GetCodeBlockRect(FBlocks[I]);
+      if PtInRect(R, Point(X, Y)) then
+      begin
+        NewHoveredBlock := FBlocks[I];
+        BtnRect := GetCodeBlockCopyBtnRect(NewHoveredBlock);
+        if PtInRect(BtnRect, Point(X, Y)) then
+          NewHoveredBtn := True;
+        Break;
+      end;
+    end;
+  end;
+
+  if (FHoveredCodeBlock <> NewHoveredBlock) or (FHoveredCopyButton <> NewHoveredBtn) then
+  begin
+    FHoveredCodeBlock := NewHoveredBlock;
+    FHoveredCopyButton := NewHoveredBtn;
     Invalidate;
   end;
 
@@ -2267,7 +2488,7 @@ begin
         Break;
       end;
 
-  if IsTaskBox or (IsLink and (FReadOnly or (ssCtrl in Shift))) then
+  if FHoveredCopyButton or IsTaskBox or (IsLink and (FReadOnly or (ssCtrl in Shift))) then
     Cursor := crHandPoint
   else
     if not FReadOnly then
@@ -2284,6 +2505,19 @@ begin
   inherited;
   if Button <> mbLeft then
     Exit;
+
+  if FHoveredCopyButton and (FHoveredCodeBlock <> nil) then
+  begin
+    TrySetClipboardText(FHoveredCodeBlock.Text);
+    FCopiedTicks := GetTickCount;
+    FCopiedBlock := FHoveredCodeBlock;
+    if HandleAllocated then
+      SetTimer(Handle, 1, 1500, nil);
+    Invalidate;
+    FSelecting := False;
+    MouseCapture := False;
+    Exit;
+  end;
 
   if FSelecting then
   begin
@@ -3137,6 +3371,11 @@ var
   EndPos: Integer;
   SubText: string;
   NextSourceLine: Integer;
+  CanvasStateBtn: TCanvasState;
+  BtnRect: TRect;
+  BtnText: string;
+  TextX: Integer;
+  TextY: Integer;
 begin
   Blocks := FBlocks;
   FLastBlockTop := Y;
@@ -3334,6 +3573,49 @@ begin
                 end;
               end;
               Canvas.Brush.Style := bsSolid;
+              // Draw copy button if this block is hovered
+              if Block = FHoveredCodeBlock then
+              begin
+                BtnRect := GetCodeBlockCopyBtnRect(Block);
+                CanvasStateBtn := TCanvasState.Save(Canvas);
+                try
+                  // Draw button background
+                  Canvas.Pen.Style := psSolid;
+                  if FHoveredCopyButton then
+                  begin
+                    Canvas.Brush.Color := GetEffectiveCodeButtonHoverColor;
+                    Canvas.Pen.Color := GetEffectiveCodeButtonHoverBorderColor;
+                  end
+                  else
+                  begin
+                    Canvas.Brush.Color := GetEffectiveCodeButtonColor;
+                    Canvas.Pen.Color := GetEffectiveCodeButtonBorderColor;
+                  end;
+                  Canvas.RoundRect(BtnRect.Left, BtnRect.Top, BtnRect.Right, BtnRect.Bottom, 4, 4);
+                  
+                  // Draw text
+                  Canvas.Font.Assign(Font);
+                  Canvas.Font.Size := 8;
+                  Canvas.Font.Style := [];
+                  if FHoveredCopyButton then
+                    Canvas.Font.Color := GetEffectiveCodeButtonHoverTextColor
+                  else
+                    Canvas.Font.Color := GetEffectiveCodeButtonTextColor;
+                    
+                  BtnText := 'Copy';
+                  if (FCopiedBlock = Block) and (GetTickCount - FCopiedTicks < 1500) then
+                    BtnText := 'Copied!';
+                  
+                  // Center text in button
+                  OldBkMode := SetBkMode(Canvas.Handle, TRANSPARENT);
+                  TextX := BtnRect.Left + (BtnRect.Width - Canvas.TextWidth(BtnText)) div 2;
+                  TextY := BtnRect.Top + (BtnRect.Height - Canvas.TextHeight(BtnText)) div 2;
+                  Canvas.TextOut(TextX, TextY, BtnText);
+                  SetBkMode(Canvas.Handle, OldBkMode);
+                finally
+                  CanvasStateBtn.Restore;
+                end;
+              end;
             finally
               CanvasState.Restore;
             end;

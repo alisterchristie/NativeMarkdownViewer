@@ -197,6 +197,10 @@ type
     procedure CodeBlockWithoutHighlightingRendersWithoutException;
     [Test]
     procedure CodeBlockWithHighlightingRendersWithoutException;
+    [Test]
+    procedure HoverOverCodeBlockShowsCopyButton;
+    [Test]
+    procedure ClickingCopyButtonCopiesToClipboard;
   end;
 
 implementation
@@ -206,6 +210,7 @@ uses
   System.SysUtils,
   System.UITypes,
   Vcl.Graphics,
+  Vcl.Clipbrd,
   Winapi.Messages,
   Winapi.Windows;
 
@@ -1582,6 +1587,58 @@ begin
 
   FViewer.SelectAll;
   Assert.IsTrue(FViewer.SelectedText.Contains('WriteLn'));
+end;
+
+procedure TMarkDownViewerTests.HoverOverCodeBlockShowsCopyButton;
+var
+  R: TRect;
+  BtnRect: TRect;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText :=
+    '```' + sLineBreak +
+    'test code' + sLineBreak +
+    '```';
+  RepaintViewer;
+ 
+  Assert.AreEqual(1, FViewer.GetCodeBlockCount);
+  R := FViewer.GetCodeBlockRect(0);
+  Assert.AreNotEqual(0, R.Width);
+ 
+  // Hover outside copy button but inside code block
+  FViewer.MouseMove([], R.Left + 5, R.Top + 5);
+  Assert.IsFalse(FViewer.IsCopyButtonHovered);
+ 
+  // Hover over copy button
+  BtnRect := FViewer.GetCodeBlockCopyBtnRect(0);
+  Assert.AreNotEqual(0, BtnRect.Width);
+  
+  FViewer.MouseMove([], BtnRect.Left + BtnRect.Width div 2, BtnRect.Top + BtnRect.Height div 2);
+  Assert.IsTrue(FViewer.IsCopyButtonHovered);
+  Assert.AreEqual(Integer(crHandPoint), Integer(FViewer.Cursor));
+end;
+ 
+procedure TMarkDownViewerTests.ClickingCopyButtonCopiesToClipboard;
+var
+  BtnRect: TRect;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText :=
+    '```' + sLineBreak +
+    'my secret code' + sLineBreak +
+    '```';
+  RepaintViewer;
+ 
+  BtnRect := FViewer.GetCodeBlockCopyBtnRect(0);
+  FViewer.MouseMove([], BtnRect.Left + BtnRect.Width div 2, BtnRect.Top + BtnRect.Height div 2);
+  
+  // Clear clipboard
+  Clipboard.AsText := '';
+  
+  // Click copy button
+  FViewer.ClickMouse(BtnRect.Left + BtnRect.Width div 2, BtnRect.Top + BtnRect.Height div 2);
+  
+  Assert.AreEqual('my secret code', Clipboard.AsText);
 end;
 
 initialization
