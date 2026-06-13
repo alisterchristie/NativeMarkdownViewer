@@ -182,6 +182,8 @@ type
     procedure SelectAll;
     procedure Undo;
     procedure ChangeHeadingLevel(Delta: Integer);
+    function AsHtml: string;
+    function AsHtmlDocument(const ATitle: string = ''): string;
     property MarkdownText: string read GetMarkdownText write SetMarkdownText;
     property MaxScrollPosition: Integer read GetMaxScrollPosition;
     property ScrollPosition: Integer read FScrollPos write SetScrollPosition;
@@ -242,7 +244,8 @@ uses
   Vcl.Imaging.jpeg,
   Vcl.Imaging.pngimage,
   MarkdownViewer.Parser,
-  MarkdownViewer.Renderer;
+  MarkdownViewer.Renderer,
+  MarkdownViewer.Html;
 
 const
   MarkdownPadding = 14;
@@ -3084,6 +3087,18 @@ end;
 procedure TMarkDownViewer.SelectAll;
 begin
   SelectAllText;
+end;
+
+// The current document rendered as an HTML fragment, using the same parser the
+// viewer paints with (link references resolved from the document).
+function TMarkDownViewer.AsHtml: string;
+begin
+  Result := MarkdownToHtml(FMarkdown.Text, FLinkReferences);
+end;
+
+function TMarkDownViewer.AsHtmlDocument(const ATitle: string): string;
+begin
+  Result := MarkdownToHtmlDocument(FMarkdown.Text, ATitle);
 end;
 
 procedure TMarkDownViewer.SetCodeBackgroundColor(const Value: TColor);

@@ -10,12 +10,14 @@ uses
   Test.MarkdownViewer.Model in 'Test.MarkdownViewer.Model.pas',
   Test.MarkdownViewer.Parser in 'Test.MarkdownViewer.Parser.pas',
   Test.MarkdownViewer.Renderer in 'Test.MarkdownViewer.Renderer.pas',
+  Test.MarkdownViewer.Html in 'Test.MarkdownViewer.Html.pas',
   Test.MarkdownViewerVCL in 'Test.MarkdownViewerVCL.pas',
   Test.Demo.MainForm in 'Test.Demo.MainForm.pas',
   Demo.MainForm in '..\TestApp\Demo.MainForm.pas' {MainForm},
   MarkdownViewer.Model in '..\MarkdownViewer.Model.pas',
   MarkdownViewer.Parser in '..\MarkdownViewer.Parser.pas',
   MarkdownViewer.Renderer in '..\MarkdownViewer.Renderer.pas',
+  MarkdownViewer.Html in '..\MarkdownViewer.Html.pas',
   MarkdownViewerVCL in '..\MarkdownViewerVCL.pas';
 
 var
