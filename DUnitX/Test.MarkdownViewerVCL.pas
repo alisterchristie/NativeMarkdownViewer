@@ -164,6 +164,8 @@ type
     [Test]
     procedure AltUpDownPreservesCaretOffset;
     [Test]
+    procedure CtrlTAndCtrlHFormatting;
+    [Test]
     procedure TabOnHeadingPreservesCaretColumn;
     [Test]
     procedure ReadOnlyArrowKeysScroll;
@@ -1396,6 +1398,34 @@ begin
   // Type X. Since the caret offset should be preserved, it should result in 'LinXe 1'
   FViewer.TypeCharacter('X');
   Assert.AreEqual('Line 2' + sLineBreak + 'LinXe 1', TrimRight(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.CtrlTAndCtrlHFormatting;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'Hello';
+  FViewer.ReadOnly := False;
+  RepaintViewer;
+
+  // Select "Hello" and toggle strikethrough (Ctrl+T)
+  FViewer.PressKey(VK_HOME);
+  FViewer.PressKey(VK_END, [ssShift]);
+  FViewer.PressKey(Ord('T'), [ssCtrl]);
+  Assert.AreEqual('~~Hello~~', TrimRight(FViewer.MarkdownText));
+
+  // Toggle strikethrough off (Ctrl+T)
+  FViewer.PressKey(Ord('T'), [ssCtrl]);
+  Assert.AreEqual('Hello', TrimRight(FViewer.MarkdownText));
+
+  // Select "Hello" and toggle highlight (Ctrl+H)
+  FViewer.PressKey(VK_HOME);
+  FViewer.PressKey(VK_END, [ssShift]);
+  FViewer.PressKey(Ord('H'), [ssCtrl]);
+  Assert.AreEqual('==Hello==', TrimRight(FViewer.MarkdownText));
+
+  // Toggle highlight off (Ctrl+H)
+  FViewer.PressKey(Ord('H'), [ssCtrl]);
+  Assert.AreEqual('Hello', TrimRight(FViewer.MarkdownText));
 end;
 
 procedure TMarkDownViewerTests.ReadOnlyArrowKeysScroll;

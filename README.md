@@ -321,6 +321,11 @@ Viewer.ReadOnly := False;
 While editing, you can use:
 - `Tab` / `Shift+Tab` on list items (bullet, numbered, or checklists) to indent/outdent the line.
 - `Tab` / `Shift+Tab` on headings to increase/decrease the heading level.
+- `Ctrl+K` to wrap the selected text in a link structure `[selected]()` and position the caret inside the parentheses, or insert `[]()` if no text is selected.
+- `Ctrl+Space` to toggle a task list checkbox (`[ ]` / `[x]`) on the current line.
+- `Ctrl+1` through `Ctrl+6` to set the heading level of the current line, and `Ctrl+0` to convert it back to a plain paragraph.
+- `Alt+Up` / `Alt+Down` to move the current line or block up/down in the document.
+- `Ctrl+T` to toggle strikethrough (`~~text~~`) and `Ctrl+H` to toggle highlight (`==text==`).
 
 Edits raise `OnChange`, and `Undo`/`Redo` walk the edit history:
 

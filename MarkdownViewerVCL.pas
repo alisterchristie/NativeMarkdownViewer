@@ -306,6 +306,7 @@ type
     procedure ToggleItalic;
     procedure ToggleStrikethrough;
     procedure ToggleInlineCode;
+    procedure ToggleHighlight;
     procedure ToggleLink;
     procedure SelectWordAtCaret;
     function AsHtml: string;
@@ -1062,6 +1063,16 @@ begin
     Ord('K'):
       if not FReadOnly then
         ToggleLink
+      else
+        Result := False;
+    Ord('T'):
+      if not FReadOnly then
+        ToggleStrikethrough
+      else
+        Result := False;
+    Ord('H'):
+      if not FReadOnly then
+        ToggleHighlight
       else
         Result := False;
     Ord('C'):
@@ -4421,6 +4432,11 @@ end;
 procedure TMarkDownViewer.ToggleInlineCode;
 begin
   ToggleInlineFormat('`');
+end;
+
+procedure TMarkDownViewer.ToggleHighlight;
+begin
+  ToggleInlineFormat('==');
 end;
 
 procedure TMarkDownViewer.ToggleLink;
