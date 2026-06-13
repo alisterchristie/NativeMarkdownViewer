@@ -144,6 +144,12 @@ type
     [Test]
     procedure TabDemotesSetextHeading;
     [Test]
+    procedure TabIndentsBulletListItem;
+    [Test]
+    procedure ShiftTabOutdentsBulletListItem;
+    [Test]
+    procedure TabIndentsChecklistItem;
+    [Test]
     procedure TabOnHeadingPreservesCaretColumn;
     [Test]
     procedure ReadOnlyArrowKeysScroll;
@@ -1227,6 +1233,39 @@ begin
   FViewer.TypeCharacter('X');
 
   Assert.AreEqual('## HelloX', Trim(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.TabIndentsBulletListItem;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := '- Hello';
+  RepaintViewer;
+
+  FViewer.PressKey(VK_TAB);
+
+  Assert.AreEqual('  - Hello', TrimRight(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.ShiftTabOutdentsBulletListItem;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := '  - Hello';
+  RepaintViewer;
+
+  FViewer.PressKey(VK_TAB, [ssShift]);
+
+  Assert.AreEqual('- Hello', TrimRight(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.TabIndentsChecklistItem;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := '- [x] task';
+  RepaintViewer;
+
+  FViewer.PressKey(VK_TAB);
+
+  Assert.AreEqual('  - [x] task', TrimRight(FViewer.MarkdownText));
 end;
 
 procedure TMarkDownViewerTests.ReadOnlyArrowKeysScroll;

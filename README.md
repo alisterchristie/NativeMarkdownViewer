@@ -318,6 +318,10 @@ are mapped back to the underlying markdown text:
 Viewer.ReadOnly := False;
 ```
 
+While editing, you can use:
+- `Tab` / `Shift+Tab` on list items (bullet, numbered, or checklists) to indent/outdent the line.
+- `Tab` / `Shift+Tab` on headings to increase/decrease the heading level.
+
 Edits raise `OnChange`, and `Undo`/`Redo` walk the edit history:
 
 ```pascal

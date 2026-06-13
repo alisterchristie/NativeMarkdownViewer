@@ -299,6 +299,7 @@ type
     procedure SelectAll;
     procedure Undo;
     procedure ChangeHeadingLevel(Delta: Integer);
+    procedure ChangeListIndent(Delta: Integer);
     procedure ToggleBold;
     procedure ToggleItalic;
     procedure ToggleStrikethrough;
@@ -1107,6 +1108,10 @@ end;
 // Editing keys (when not read-only): caret movement, deletion and Tab heading
 // level changes. Returns True when the key was consumed.
 function TMarkDownViewer.HandleEditingKey(Key: Word; Shift: TShiftState): Boolean;
+var
+  OldSourcePos: Integer;
+  LineIdx: Integer;
+  Block: TMarkDownBlock;
 begin
   Result := True;
   case Key of
@@ -1133,10 +1138,25 @@ begin
     VK_ESCAPE:
       ClearSelection;
     VK_TAB:
-      if ssShift in Shift then
-        ChangeHeadingLevel(-1)
-      else
-        ChangeHeadingLevel(1);
+      begin
+        OldSourcePos := SelectableToSourcePosition(FSelectionCaret);
+        LineIdx := SourcePosToLine(OldSourcePos);
+        Block := GetBlockAtLine(LineIdx);
+        if (Block <> nil) and (Block.Kind = bkListItem) then
+        begin
+          if ssShift in Shift then
+            ChangeListIndent(-1)
+          else
+            ChangeListIndent(1);
+        end
+        else
+        begin
+          if ssShift in Shift then
+            ChangeHeadingLevel(-1)
+          else
+            ChangeHeadingLevel(1);
+        end;
+      end;
   else
     Result := False;
   end;
@@ -3981,6 +4001,51 @@ begin
     NewSourcePos := OldSourcePos;
   NewSourcePos := Min(NewSourcePos,
     LineStartSourcePos(Block.SourceStartLine) + Length(NewLine));
+  FinishEditAtSource(NewSourcePos);
+end;
+
+procedure TMarkDownViewer.ChangeListIndent(Delta: Integer);
+var
+  Block: TMarkDownBlock;
+  LineIdx: Integer;
+  OldLine: string;
+  NewLine: string;
+  OldSourcePos: Integer;
+  NewSourcePos: Integer;
+begin
+  if FReadOnly then Exit;
+  if FSelectableText = '' then Exit;
+
+  OldSourcePos := SelectableToSourcePosition(FSelectionCaret);
+  LineIdx := SourcePosToLine(OldSourcePos);
+  Block := GetBlockAtLine(LineIdx);
+  if Block = nil then Exit;
+  if Block.Kind <> bkListItem then Exit;
+  if (LineIdx < 0) or (LineIdx >= FMarkdown.Count) then Exit;
+
+  OldLine := FMarkdown[LineIdx];
+  if Delta > 0 then
+  begin
+    // Indent: add 2 spaces to the beginning of the line
+    NewLine := '  ' + OldLine;
+  end
+  else
+  begin
+    // Outdent: remove up to 2 spaces from the beginning of the line
+    if OldLine.StartsWith('  ') then
+      NewLine := Copy(OldLine, 3, MaxInt)
+    else if OldLine.StartsWith(' ') then
+      NewLine := Copy(OldLine, 2, MaxInt)
+    else
+      Exit;
+  end;
+
+  if NewLine = OldLine then Exit;
+
+  PushUndoState;
+  ApplyMarkdownLine(LineIdx, NewLine);
+
+  NewSourcePos := Max(LineStartSourcePos(LineIdx), OldSourcePos + (Length(NewLine) - Length(OldLine)));
   FinishEditAtSource(NewSourcePos);
 end;
 
