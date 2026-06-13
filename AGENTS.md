@@ -10,6 +10,8 @@ This repository contains a Delphi VCL markdown viewer component package, a VCL d
   - `MarkdownViewer.Model.pas` - block, inline-token, and text-run model types
   - `MarkdownViewer.Parser.pas` - markdown-to-block parsing and streaming reparse
   - `MarkdownViewer.Renderer.pas` - layout and GDI rendering helpers
+  - `MarkdownViewer.Highlight.pas` - pluggable code-block syntax highlighters and their registry
+  - `MarkdownViewer.Html.pas` - HTML export (`AsHtml` / `AsHtmlDocument`)
 - Demo app: `TestApp/MarkdownViewerDemo.dproj`
 - Demo forms:
   - `TestApp/Demo.IntroForm.pas` - launcher for the basic and streaming demos
@@ -100,6 +102,16 @@ open the PNG. Prefer this over screenshotting the running demo.
   Edits and caret motion are mapped back to the markdown source, so keep the
   selectable-text-to-source position mapping consistent when changing parsing or layout.
 - Keep source ASCII unless there is a clear Delphi/VCL reason to use Unicode text.
+- Code-block syntax highlighting lives in `MarkdownViewer.Highlight.pas`. Each
+  highlighter is a hand-written lexer implementing `IMarkdownSyntaxHighlighter`
+  and registered by language tag in `TMarkdownSyntaxHighlighterRegistry`. Every
+  lexer must tile its input exactly - contiguous, gap-free, non-zero-length
+  tokens whose concatenation reproduces the source (a lexer that emits a
+  zero-length token without advancing will hang the render loop). The
+  `TestTokenStreamInvariants*` tests enforce this for all languages; add new
+  languages there. Token colours/styles are resolved per theme in
+  `TMarkDownViewer` (`GetSyntaxColor`/`GetSyntaxStyle`, exposed via the
+  `SyntaxColors` property).
 
 ## Git Commits
 

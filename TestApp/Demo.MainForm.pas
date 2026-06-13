@@ -221,6 +221,28 @@ begin
 end;
 ```
 
+### Delphi form file (.dfm)
+
+```dfm
+object MainForm: TMainForm
+  Left = 0
+  Top = 0
+  Caption = 'Markdown Viewer'
+  ClientHeight = 480
+  ClientWidth = 640
+  Color = clBtnFace
+  Font.Charset = DEFAULT_CHARSET
+  Font.Height = -12
+  object btnOpen: TButton
+    Left = 8
+    Top = 8
+    Caption = '&Open...'
+    TabOrder = 0
+    OnClick = btnOpenClick
+  end
+end
+```
+
 ### C
 
 ```c

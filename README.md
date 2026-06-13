@@ -10,6 +10,8 @@ Native VCL markdown viewer component for Delphi.
 - `MarkdownViewer.Model.pas` - block, inline-token, and text-run model types
 - `MarkdownViewer.Parser.pas` - markdown-to-block parsing (including tail-only streaming reparse)
 - `MarkdownViewer.Renderer.pas` - layout and GDI rendering helpers
+- `MarkdownViewer.Highlight.pas` - pluggable code-block syntax highlighters and their registry
+- `MarkdownViewer.Html.pas` - HTML export helpers
 - `KaiMarkdownViewer.dpk` - Delphi package source
 - `KaiMarkdownViewer.dproj` - package project
 - `MarkdownGroup.groupproj` - project group (package, demo, and tests)
@@ -37,6 +39,7 @@ Supported rendering includes:
 - Reference-style links
 - Inline code
 - Fenced code blocks
+- Syntax highlighting of fenced code blocks for 25+ languages (configurable via `SyntaxColors`)
 - Block quotes
 - Horizontal rules
 - Ordered and unordered lists
@@ -205,6 +208,49 @@ automatic fallback when the requested font is not installed:
 Viewer.CodeFontName := 'Cascadia Code';
 ```
 
+Fenced code blocks are syntax highlighted when the opening fence carries a
+language tag. The tag is matched case-insensitively against a registry of
+built-in highlighters:
+
+````markdown
+```pascal
+procedure Hello;
+begin
+  WriteLn('Hi');   // greet
+end;
+```
+````
+
+Built-in languages (with the fence tags that select them):
+
+| Language | Tags |
+| :--- | :--- |
+| Delphi / Object Pascal | `pascal`, `objectpascal`, `objpas`, `delphi`, `pas`, `dpr`, `dpk`, `pp`, `lpr` |
+| Delphi form file | `dfm` |
+| C / C++ / C# | `c`; `cpp`, `c++`, `cxx`, `cc`, `hpp`; `cs`, `csharp`, `c#` |
+| Java / JavaScript / TypeScript | `java`; `js`, `javascript`; `ts`, `typescript` |
+| Go / Rust / PHP | `go`; `rs`, `rust`; `php` |
+| Python / Ruby | `py`, `python`; `rb`, `ruby` |
+| SQL | `sql` |
+| HTML / XML / CSS | `html`, `htm`; `xml`; `css` |
+| JSON / YAML | `json`; `yaml`, `yml` |
+| Shell / INI | `sh`, `bash`, `shell`; `ini`, `cfg`, `conf` |
+
+Token colours and font styles are exposed through the `SyntaxColors` property.
+Each token kind (keyword, comment, string, number, type, preprocessor, symbol,
+and plain) has a colour and a style. Colours default to `clDefault`, which
+resolves to a theme-aware palette that adapts to light and dark backgrounds;
+set a colour explicitly to override it:
+
+```pascal
+Viewer.SyntaxColors.KeywordColor := clNavy;
+Viewer.SyntaxColors.CommentStyle := [fsItalic];
+```
+
+An unrecognized or missing language tag falls back to plain, unhighlighted
+code. Additional languages can be registered at runtime with
+`TMarkdownSyntaxHighlighterRegistry.RegisterHighlighter`.
+
 Task list checkboxes are clickable by default and toggle the underlying
 markdown source (set `AllowTaskToggle := False` for a static preview).
 
@@ -264,6 +310,19 @@ Viewer.Redo;
 
 `OnScroll` fires when the vertical scroll position changes, which is useful for
 synchronizing an external editor or scrollbar.
+
+## HTML Export
+
+The current markdown can be exported to HTML. `AsHtml` returns an HTML fragment,
+and `AsHtmlDocument` wraps it in a complete document with an optional title:
+
+```pascal
+Fragment := Viewer.AsHtml;
+Page := Viewer.AsHtmlDocument('My Notes');
+```
+
+The conversion is also available without a control through
+`MarkdownToHtml` / `MarkdownToHtmlDocument` in `MarkdownViewer.Html`.
 
 ## Demo Application
 
