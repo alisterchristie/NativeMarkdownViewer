@@ -8,6 +8,7 @@ uses
   MarkdownViewer.Parser in '..\MarkdownViewer.Parser.pas',
   MarkdownViewer.Renderer in '..\MarkdownViewer.Renderer.pas',
   MarkdownViewer.Html in '..\MarkdownViewer.Html.pas',
+  MarkdownViewer.Highlight in '..\MarkdownViewer.Highlight.pas',
   Demo.IntroForm in 'Demo.IntroForm.pas' {frmIntro},
   Demo.StreamingForm in 'Demo.StreamingForm.pas' {frmStreaming},
   Vcl.Themes,

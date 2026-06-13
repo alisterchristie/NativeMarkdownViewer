@@ -36,6 +36,7 @@ contains
   MarkdownViewerVCL in 'MarkdownViewerVCL.pas',
   MarkdownViewer.Model in 'MarkdownViewer.Model.pas',
   MarkdownViewer.Parser in 'MarkdownViewer.Parser.pas',
-  MarkdownViewer.Renderer in 'MarkdownViewer.Renderer.pas';
+  MarkdownViewer.Renderer in 'MarkdownViewer.Renderer.pas',
+  MarkdownViewer.Highlight in 'MarkdownViewer.Highlight.pas';
 
 end.

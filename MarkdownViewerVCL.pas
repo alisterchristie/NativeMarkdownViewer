@@ -11,14 +11,79 @@ uses
   Vcl.Controls,
   Vcl.Graphics,
   Vcl.Themes,
-  MarkdownViewer.Model;
+  MarkdownViewer.Model,
+  MarkdownViewer.Highlight;
 
 type
   TMarkDownLinkClickEvent = procedure(Sender: TObject; const Url: string) of object;
 
+  TMarkdownSyntaxColors = class(TPersistent)
+  private
+    FPlainColor: TColor;
+    FKeywordColor: TColor;
+    FCommentColor: TColor;
+    FStringColor: TColor;
+    FNumberColor: TColor;
+    FTypeColor: TColor;
+    FPreprocessorColor: TColor;
+    FSymbolColor: TColor;
+
+    FPlainStyle: TFontStyles;
+    FKeywordStyle: TFontStyles;
+    FCommentStyle: TFontStyles;
+    FStringStyle: TFontStyles;
+    FNumberStyle: TFontStyles;
+    FTypeStyle: TFontStyles;
+    FPreprocessorStyle: TFontStyles;
+    FSymbolStyle: TFontStyles;
+
+    FOwner: TComponent;
+    procedure SetPlainColor(Value: TColor);
+    procedure SetKeywordColor(Value: TColor);
+    procedure SetCommentColor(Value: TColor);
+    procedure SetStringColor(Value: TColor);
+    procedure SetNumberColor(Value: TColor);
+    procedure SetTypeColor(Value: TColor);
+    procedure SetPreprocessorColor(Value: TColor);
+    procedure SetSymbolColor(Value: TColor);
+
+    procedure SetPlainStyle(Value: TFontStyles);
+    procedure SetKeywordStyle(Value: TFontStyles);
+    procedure SetCommentStyle(Value: TFontStyles);
+    procedure SetStringStyle(Value: TFontStyles);
+    procedure SetNumberStyle(Value: TFontStyles);
+    procedure SetTypeStyle(Value: TFontStyles);
+    procedure SetPreprocessorStyle(Value: TFontStyles);
+    procedure SetSymbolStyle(Value: TFontStyles);
+
+    procedure Changed;
+  public
+    constructor Create(AOwner: TComponent);
+    procedure Assign(Source: TPersistent); override;
+  published
+    property PlainColor: TColor read FPlainColor write SetPlainColor default clDefault;
+    property KeywordColor: TColor read FKeywordColor write SetKeywordColor default clDefault;
+    property CommentColor: TColor read FCommentColor write SetCommentColor default clDefault;
+    property StringColor: TColor read FStringColor write SetStringColor default clDefault;
+    property NumberColor: TColor read FNumberColor write SetNumberColor default clDefault;
+    property TypeColor: TColor read FTypeColor write SetTypeColor default clDefault;
+    property PreprocessorColor: TColor read FPreprocessorColor write SetPreprocessorColor default clDefault;
+    property SymbolColor: TColor read FSymbolColor write SetSymbolColor default clDefault;
+
+    property PlainStyle: TFontStyles read FPlainStyle write SetPlainStyle default [];
+    property KeywordStyle: TFontStyles read FKeywordStyle write SetKeywordStyle default [fsBold];
+    property CommentStyle: TFontStyles read FCommentStyle write SetCommentStyle default [fsItalic];
+    property StringStyle: TFontStyles read FStringStyle write SetStringStyle default [];
+    property NumberStyle: TFontStyles read FNumberStyle write SetNumberStyle default [];
+    property TypeStyle: TFontStyles read FTypeStyle write SetTypeStyle default [];
+    property PreprocessorStyle: TFontStyles read FPreprocessorStyle write SetPreprocessorStyle default [];
+    property SymbolStyle: TFontStyles read FSymbolStyle write SetSymbolStyle default [];
+  end;
+
   TMarkDownViewer = class(TCustomControl)
   private
     FMarkdown: TStringList;
+    FSyntaxColors: TMarkdownSyntaxColors;
     FBlocks: TMarkDownBlockList;
     FLinkHits: TMarkDownLinkHitList;
     FTaskHits: TMarkDownTaskHitList;
@@ -54,6 +119,18 @@ type
     FOnChange: TNotifyEvent;
     FOnLinkClick: TMarkDownLinkClickEvent;
     FOnScroll: TNotifyEvent;
+    procedure SetSyntaxColors(Value: TMarkdownSyntaxColors);
+    function IsBackgroundDark: Boolean;
+    function GetEffectivePlainColor: TColor;
+    function GetEffectiveKeywordColor: TColor;
+    function GetEffectiveCommentColor: TColor;
+    function GetEffectiveStringColor: TColor;
+    function GetEffectiveNumberColor: TColor;
+    function GetEffectiveTypeColor: TColor;
+    function GetEffectivePreprocessorColor: TColor;
+    function GetEffectiveSymbolColor: TColor;
+    function GetSyntaxColor(Kind: TSourceTokenKind): TColor;
+    function GetSyntaxStyle(Kind: TSourceTokenKind): TFontStyles;
     function GetCachedImage(const ImagePath: string): TPicture;
     function GetMarkdown: TStrings;
     function GetMarkdownText: string;
@@ -229,6 +306,7 @@ type
     property QuoteBarColor: TColor read FQuoteBarColor write SetQuoteBarColor default clDefault;
     property SearchHighlightColor: TColor read FSearchHighlightColor write SetSearchHighlightColor default clDefault;
     property SearchText: string read FSearchText write SetSearchText;
+    property SyntaxColors: TMarkdownSyntaxColors read FSyntaxColors write SetSyntaxColors;
     property ShowHint;
     property TabOrder;
     property TabStop default True;
@@ -351,6 +429,7 @@ begin
   FSearchHighlightColor := clDefault;
   FMarkdown := TStringList.Create;
   FMarkdown.OnChange := MarkdownChanged;
+  FSyntaxColors := TMarkdownSyntaxColors.Create(Self);
   FLinkReferences := TStringList.Create;
   FLinkReferences.CaseSensitive := False;
   FCodeFontName := 'Consolas';
@@ -384,6 +463,7 @@ begin
   FBlocks.Free;
   FLinkReferences.Free;
   FMarkdown.Free;
+  FSyntaxColors.Free;
   inherited Destroy;
 end;
 
@@ -470,6 +550,335 @@ end;
 function TMarkDownViewer.GetEffectiveTableHeaderColor: TColor;
 begin
   Result := ThemedColor(clBtnFace, $00F7F7F7);
+end;
+
+{ TMarkdownSyntaxColors }
+
+constructor TMarkdownSyntaxColors.Create(AOwner: TComponent);
+begin
+  inherited Create;
+  FOwner := AOwner;
+  FPlainColor := clDefault;
+  FKeywordColor := clDefault;
+  FCommentColor := clDefault;
+  FStringColor := clDefault;
+  FNumberColor := clDefault;
+  FTypeColor := clDefault;
+  FPreprocessorColor := clDefault;
+  FSymbolColor := clDefault;
+
+  FPlainStyle := [];
+  FKeywordStyle := [fsBold];
+  FCommentStyle := [fsItalic];
+  FStringStyle := [];
+  FNumberStyle := [];
+  FTypeStyle := [];
+  FPreprocessorStyle := [];
+  FSymbolStyle := [];
+end;
+
+procedure TMarkdownSyntaxColors.Assign(Source: TPersistent);
+var
+  Src: TMarkdownSyntaxColors;
+begin
+  if Source is TMarkdownSyntaxColors then
+  begin
+    Src := TMarkdownSyntaxColors(Source);
+    FPlainColor := Src.PlainColor;
+    FKeywordColor := Src.KeywordColor;
+    FCommentColor := Src.CommentColor;
+    FStringColor := Src.StringColor;
+    FNumberColor := Src.NumberColor;
+    FTypeColor := Src.TypeColor;
+    FPreprocessorColor := Src.PreprocessorColor;
+    FSymbolColor := Src.SymbolColor;
+
+    FPlainStyle := Src.PlainStyle;
+    FKeywordStyle := Src.KeywordStyle;
+    FCommentStyle := Src.CommentStyle;
+    FStringStyle := Src.StringStyle;
+    FNumberStyle := Src.NumberStyle;
+    FTypeStyle := Src.TypeStyle;
+    FPreprocessorStyle := Src.PreprocessorStyle;
+    FSymbolStyle := Src.SymbolStyle;
+    Changed;
+  end
+  else
+    inherited Assign(Source);
+end;
+
+procedure TMarkdownSyntaxColors.Changed;
+begin
+  if (FOwner <> nil) and (FOwner is TCustomControl) then
+    TCustomControl(FOwner).Invalidate;
+end;
+
+procedure TMarkdownSyntaxColors.SetPlainColor(Value: TColor);
+begin
+  if FPlainColor <> Value then
+  begin
+    FPlainColor := Value;
+    Changed;
+  end;
+end;
+
+procedure TMarkdownSyntaxColors.SetKeywordColor(Value: TColor);
+begin
+  if FKeywordColor <> Value then
+  begin
+    FKeywordColor := Value;
+    Changed;
+  end;
+end;
+
+procedure TMarkdownSyntaxColors.SetCommentColor(Value: TColor);
+begin
+  if FCommentColor <> Value then
+  begin
+    FCommentColor := Value;
+    Changed;
+  end;
+end;
+
+procedure TMarkdownSyntaxColors.SetStringColor(Value: TColor);
+begin
+  if FStringColor <> Value then
+  begin
+    FStringColor := Value;
+    Changed;
+  end;
+end;
+
+procedure TMarkdownSyntaxColors.SetNumberColor(Value: TColor);
+begin
+  if FNumberColor <> Value then
+  begin
+    FNumberColor := Value;
+    Changed;
+  end;
+end;
+
+procedure TMarkdownSyntaxColors.SetTypeColor(Value: TColor);
+begin
+  if FTypeColor <> Value then
+  begin
+    FTypeColor := Value;
+    Changed;
+  end;
+end;
+
+procedure TMarkdownSyntaxColors.SetPreprocessorColor(Value: TColor);
+begin
+  if FPreprocessorColor <> Value then
+  begin
+    FPreprocessorColor := Value;
+    Changed;
+  end;
+end;
+
+procedure TMarkdownSyntaxColors.SetSymbolColor(Value: TColor);
+begin
+  if FSymbolColor <> Value then
+  begin
+    FSymbolColor := Value;
+    Changed;
+  end;
+end;
+
+procedure TMarkdownSyntaxColors.SetPlainStyle(Value: TFontStyles);
+begin
+  if FPlainStyle <> Value then
+  begin
+    FPlainStyle := Value;
+    Changed;
+  end;
+end;
+
+procedure TMarkdownSyntaxColors.SetKeywordStyle(Value: TFontStyles);
+begin
+  if FKeywordStyle <> Value then
+  begin
+    FKeywordStyle := Value;
+    Changed;
+  end;
+end;
+
+procedure TMarkdownSyntaxColors.SetCommentStyle(Value: TFontStyles);
+begin
+  if FCommentStyle <> Value then
+  begin
+    FCommentStyle := Value;
+    Changed;
+  end;
+end;
+
+procedure TMarkdownSyntaxColors.SetStringStyle(Value: TFontStyles);
+begin
+  if FStringStyle <> Value then
+  begin
+    FStringStyle := Value;
+    Changed;
+  end;
+end;
+
+procedure TMarkdownSyntaxColors.SetNumberStyle(Value: TFontStyles);
+begin
+  if FNumberStyle <> Value then
+  begin
+    FNumberStyle := Value;
+    Changed;
+  end;
+end;
+
+procedure TMarkdownSyntaxColors.SetTypeStyle(Value: TFontStyles);
+begin
+  if FTypeStyle <> Value then
+  begin
+    FTypeStyle := Value;
+    Changed;
+  end;
+end;
+
+procedure TMarkdownSyntaxColors.SetPreprocessorStyle(Value: TFontStyles);
+begin
+  if FPreprocessorStyle <> Value then
+  begin
+    FPreprocessorStyle := Value;
+    Changed;
+  end;
+end;
+
+procedure TMarkdownSyntaxColors.SetSymbolStyle(Value: TFontStyles);
+begin
+  if FSymbolStyle <> Value then
+  begin
+    FSymbolStyle := Value;
+    Changed;
+  end;
+end;
+
+{ TMarkDownViewer - Syntax Highlight Helpers }
+
+procedure TMarkDownViewer.SetSyntaxColors(Value: TMarkdownSyntaxColors);
+begin
+  FSyntaxColors.Assign(Value);
+  Invalidate;
+end;
+
+function TMarkDownViewer.IsBackgroundDark: Boolean;
+var
+  R, G, B: Integer;
+  IsLight: Boolean;
+begin
+  GetBackgroundChannels(R, G, B, IsLight);
+  Result := not IsLight;
+end;
+
+function TMarkDownViewer.GetEffectivePlainColor: TColor;
+begin
+  if FSyntaxColors.PlainColor <> clDefault then
+    Exit(FSyntaxColors.PlainColor);
+  Result := GetEffectiveTextColor;
+end;
+
+function TMarkDownViewer.GetEffectiveKeywordColor: TColor;
+begin
+  if FSyntaxColors.KeywordColor <> clDefault then
+    Exit(FSyntaxColors.KeywordColor);
+  if IsBackgroundDark then
+    Result := $00FF9010 // Light blue
+  else
+    Result := clBlue;
+end;
+
+function TMarkDownViewer.GetEffectiveCommentColor: TColor;
+begin
+  if FSyntaxColors.CommentColor <> clDefault then
+    Exit(FSyntaxColors.CommentColor);
+  if IsBackgroundDark then
+    Result := $0070A070 // Light green
+  else
+    Result := $00008000; // Dark green
+end;
+
+function TMarkDownViewer.GetEffectiveStringColor: TColor;
+begin
+  if FSyntaxColors.StringColor <> clDefault then
+    Exit(FSyntaxColors.StringColor);
+  if IsBackgroundDark then
+    Result := $0080C0FF // Light orange
+  else
+    Result := $00001090; // Dark orange/red
+end;
+
+function TMarkDownViewer.GetEffectiveNumberColor: TColor;
+begin
+  if FSyntaxColors.NumberColor <> clDefault then
+    Exit(FSyntaxColors.NumberColor);
+  if IsBackgroundDark then
+    Result := $00FFB070 // Light orange/brown
+  else
+    Result := $000040A0; // Brown
+end;
+
+function TMarkDownViewer.GetEffectiveTypeColor: TColor;
+begin
+  if FSyntaxColors.TypeColor <> clDefault then
+    Exit(FSyntaxColors.TypeColor);
+  if IsBackgroundDark then
+    Result := $0080FFFF // Yellow
+  else
+    Result := clNavy;
+end;
+
+function TMarkDownViewer.GetEffectivePreprocessorColor: TColor;
+begin
+  if FSyntaxColors.PreprocessorColor <> clDefault then
+    Exit(FSyntaxColors.PreprocessorColor);
+  if IsBackgroundDark then
+    Result := $00A0A0A0 // Light gray
+  else
+    Result := $00606060; // Dark gray
+end;
+
+function TMarkDownViewer.GetEffectiveSymbolColor: TColor;
+begin
+  if FSyntaxColors.SymbolColor <> clDefault then
+    Exit(FSyntaxColors.SymbolColor);
+  if IsBackgroundDark then
+    Result := $00D0D0D0 // Light gray
+  else
+    Result := $00303030; // Dark gray
+end;
+
+function TMarkDownViewer.GetSyntaxColor(Kind: TSourceTokenKind): TColor;
+begin
+  case Kind of
+    stKeyword: Result := GetEffectiveKeywordColor;
+    stComment: Result := GetEffectiveCommentColor;
+    stString: Result := GetEffectiveStringColor;
+    stNumber: Result := GetEffectiveNumberColor;
+    stType: Result := GetEffectiveTypeColor;
+    stPreprocessor: Result := GetEffectivePreprocessorColor;
+    stSymbol: Result := GetEffectiveSymbolColor;
+  else
+    Result := GetEffectivePlainColor;
+  end;
+end;
+
+function TMarkDownViewer.GetSyntaxStyle(Kind: TSourceTokenKind): TFontStyles;
+begin
+  case Kind of
+    stKeyword: Result := FSyntaxColors.KeywordStyle;
+    stComment: Result := FSyntaxColors.CommentStyle;
+    stString: Result := FSyntaxColors.StringStyle;
+    stNumber: Result := FSyntaxColors.NumberStyle;
+    stType: Result := FSyntaxColors.TypeStyle;
+    stPreprocessor: Result := FSyntaxColors.PreprocessorStyle;
+    stSymbol: Result := FSyntaxColors.SymbolStyle;
+  else
+    Result := FSyntaxColors.PlainStyle;
+  end;
 end;
 
 // Decompose the effective background into 8-bit channels and report whether
@@ -2676,6 +3085,17 @@ var
   TextIndent: Integer;
   LineTextStart: Integer;
   OldBkMode: Integer;
+  Highlighter: IMarkdownSyntaxHighlighter;
+  SyntaxTokens: TArray<TSourceToken>;
+  TokenIndex: Integer;
+  CurrentX: Integer;
+  LineStart: Integer;
+  LineEnd: Integer;
+  TokenOffset: Integer;
+  TokenLen: Integer;
+  StartPos: Integer;
+  EndPos: Integer;
+  SubText: string;
 begin
   Blocks := FBlocks;
   FLastBlockTop := Y;
@@ -2800,6 +3220,13 @@ begin
               Canvas.Brush.Color := GetEffectiveCodeBackgroundColor;
               Canvas.FillRect(R);
               Canvas.Brush.Style := bsClear;
+              
+              Highlighter := TMarkdownSyntaxHighlighterRegistry.GetHighlighter(Block.CodeLanguage);
+              if Highlighter <> nil then
+                SyntaxTokens := Highlighter.Highlight(Block.Text)
+              else
+                SyntaxTokens := nil;
+
               for LineIndex := 0 to Lines.Count - 1 do
               begin
                 LineTextStart := AddSelectableRun(
@@ -2808,17 +3235,47 @@ begin
                     Y + 8 + (LineIndex * LineHeight) + LineHeight),
                   Lines[LineIndex],
                   SliceMap(Block.SourceMap, CodePos, Length(Lines[LineIndex])));
-                Inc(CodePos, Length(Lines[LineIndex]));
                 if (Y + 8 + (LineIndex * LineHeight) + LineHeight >= 0) and
                   (Y + 8 + (LineIndex * LineHeight) <= ClientHeight) then
                 begin
                   DrawSelectionBackground(Lines[LineIndex], TextLeft + 8,
                     Y + 8 + (LineIndex * LineHeight), LineHeight, LineTextStart);
                   OldBkMode := SetBkMode(Canvas.Handle, TRANSPARENT);
-                  DrawSelectableText(Lines[LineIndex], TextLeft + 8,
-                    Y + 8 + (LineIndex * LineHeight), LineTextStart);
+                  
+                  if SyntaxTokens <> nil then
+                  begin
+                    CurrentX := TextLeft + 8;
+                    LineStart := CodePos;
+                    LineEnd := LineStart + Length(Lines[LineIndex]);
+                    for TokenIndex := 0 to Length(SyntaxTokens) - 1 do
+                    begin
+                      TokenOffset := SyntaxTokens[TokenIndex].Offset;
+                      TokenLen := Length(SyntaxTokens[TokenIndex].Text);
+                      StartPos := Max(TokenOffset, LineStart);
+                      EndPos := Min(TokenOffset + TokenLen, LineEnd);
+                      if StartPos < EndPos then
+                      begin
+                        SubText := Copy(SyntaxTokens[TokenIndex].Text, StartPos - TokenOffset + 1, EndPos - StartPos);
+                        Canvas.Font.Color := GetSyntaxColor(SyntaxTokens[TokenIndex].Kind);
+                        Canvas.Font.Style := GetSyntaxStyle(SyntaxTokens[TokenIndex].Kind);
+                        DrawSelectableText(SubText, CurrentX,
+                          Y + 8 + (LineIndex * LineHeight), LineTextStart + (StartPos - LineStart));
+                        Inc(CurrentX, Canvas.TextWidth(SubText));
+                      end;
+                    end;
+                  end
+                  else
+                  begin
+                    Canvas.Font.Color := GetEffectivePlainColor;
+                    Canvas.Font.Style := [];
+                    DrawSelectableText(Lines[LineIndex], TextLeft + 8,
+                      Y + 8 + (LineIndex * LineHeight), LineTextStart);
+                  end;
+                  
                   SetBkMode(Canvas.Handle, OldBkMode);
                 end;
+                
+                Inc(CodePos, Length(Lines[LineIndex]));
                 // Unconditional break so blank code lines survive in the
                 // selectable text (AddSelectableBreak collapses repeats).
                 if LineIndex < Lines.Count - 1 then

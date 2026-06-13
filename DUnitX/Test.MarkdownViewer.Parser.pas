@@ -22,6 +22,8 @@ type
     [Test]
     procedure ParseBlocksGroupsFencedCode;
     [Test]
+    procedure ParseBlocksExtractsFenceLanguage;
+    [Test]
     procedure ParseBlocksMergesQuoteLines;
     [Test]
     procedure ParseBlocksGroupsTableRows;
@@ -236,6 +238,28 @@ begin
     Assert.AreEqual(1, Blocks.Count);
     Assert.IsTrue(Blocks[0].Kind = bkCodeBlock);
     Assert.AreEqual('line1' + sLineBreak + 'line2', Blocks[0].Text);
+  finally
+    Blocks.Free;
+    Lines.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.ParseBlocksExtractsFenceLanguage;
+var
+  Blocks: TMarkDownBlockList;
+  Lines: TStringList;
+begin
+  Lines := TStringList.Create;
+  Blocks := nil;
+  try
+    Lines.Add('```pascal extra args');
+    Lines.Add('var X: Integer;');
+    Lines.Add('```');
+    Blocks := TMarkDownBlockParser.ParseBlocks(Lines);
+    Assert.AreEqual(1, Blocks.Count);
+    Assert.IsTrue(Blocks[0].Kind = bkCodeBlock);
+    Assert.AreEqual('pascal', Blocks[0].CodeLanguage);
+    Assert.AreEqual('var X: Integer;', Blocks[0].Text);
   finally
     Blocks.Free;
     Lines.Free;

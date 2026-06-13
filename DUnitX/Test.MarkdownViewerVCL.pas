@@ -189,6 +189,10 @@ type
     procedure EnterOnEmptyItemExitsList;
     [Test]
     procedure EnterInMiddleOfListInsertsItem;
+    [Test]
+    procedure CodeBlockWithoutHighlightingRendersWithoutException;
+    [Test]
+    procedure CodeBlockWithHighlightingRendersWithoutException;
   end;
 
 implementation
@@ -1494,6 +1498,34 @@ begin
 
   Assert.AreEqual('- one' + sLineBreak + '- two' + sLineBreak + '- three',
     Trim(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.CodeBlockWithoutHighlightingRendersWithoutException;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText :=
+    '```' + sLineBreak +
+    'plain code line' + sLineBreak +
+    '```';
+  RepaintViewer;
+
+  FViewer.SelectAll;
+  Assert.IsTrue(FViewer.SelectedText.Contains('plain code line'));
+end;
+
+procedure TMarkDownViewerTests.CodeBlockWithHighlightingRendersWithoutException;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText :=
+    '```pascal' + sLineBreak +
+    'begin' + sLineBreak +
+    '  WriteLn(''Hello'');' + sLineBreak +
+    'end.' + sLineBreak +
+    '```';
+  RepaintViewer;
+
+  FViewer.SelectAll;
+  Assert.IsTrue(FViewer.SelectedText.Contains('WriteLn'));
 end;
 
 initialization

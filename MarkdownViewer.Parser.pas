@@ -25,6 +25,7 @@ type
       References: TStrings = nil;
       const SourceMap: TArray<Integer> = nil): TMarkDownInlineList; static;
     class function StartsWithFence(const S: string): Boolean; static;
+    class function ExtractFenceLanguage(const S: string): string; static;
     class procedure SplitTableRow(const Line: string; Cells: TStrings); static;
     class function TrimLeftOnly(const S: string): string; static;
     class function TryParseHeading(const Line: string; out Text: string;
@@ -67,6 +68,24 @@ end;
 class function TMarkDownBlockParser.StartsWithFence(const S: string): Boolean;
 begin
   Result := Copy(TrimLeftOnly(S), 1, 3) = '```';
+end;
+
+class function TMarkDownBlockParser.ExtractFenceLanguage(const S: string): string;
+var
+  T: string;
+  I: Integer;
+begin
+  T := Trim(S);
+  if (Length(T) >= 3) and (Copy(T, 1, 3) = '```') then
+  begin
+    T := Trim(Copy(T, 4, MaxInt));
+    I := 1;
+    while (I <= Length(T)) and not CharInSet(T[I], [' ', #9, #13, #10]) do
+      Inc(I);
+    Result := Copy(T, 1, I - 1);
+  end
+  else
+    Result := '';
 end;
 
 class function TMarkDownBlockParser.IsRuleLine(const S: string): Boolean;
@@ -402,6 +421,7 @@ begin
   Result.Number := 0;
   Result.IsTask := False;
   Result.TaskChecked := False;
+  Result.CodeLanguage := '';
   Result.SourceStartLine := SourceStartLine;
 end;
 
@@ -462,7 +482,9 @@ begin
         CodeText := CodeText + Lines[I];
         Inc(I);
       end;
-      Result.Add(NewBlock(bkCodeBlock, CodeText, BlockStartLine));
+      Block := NewBlock(bkCodeBlock, CodeText, BlockStartLine);
+      Block.CodeLanguage := ExtractFenceLanguage(Lines[BlockStartLine]);
+      Result.Add(Block);
       if I < Lines.Count then
         Inc(I);
       Continue;

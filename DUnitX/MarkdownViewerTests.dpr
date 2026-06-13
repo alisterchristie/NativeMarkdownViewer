@@ -13,11 +13,13 @@ uses
   Test.MarkdownViewer.Html in 'Test.MarkdownViewer.Html.pas',
   Test.MarkdownViewerVCL in 'Test.MarkdownViewerVCL.pas',
   Test.Demo.MainForm in 'Test.Demo.MainForm.pas',
+  Test.MarkdownViewer.Highlight in 'Test.MarkdownViewer.Highlight.pas',
   Demo.MainForm in '..\TestApp\Demo.MainForm.pas' {MainForm},
   MarkdownViewer.Model in '..\MarkdownViewer.Model.pas',
   MarkdownViewer.Parser in '..\MarkdownViewer.Parser.pas',
   MarkdownViewer.Renderer in '..\MarkdownViewer.Renderer.pas',
   MarkdownViewer.Html in '..\MarkdownViewer.Html.pas',
+  MarkdownViewer.Highlight in '..\MarkdownViewer.Highlight.pas',
   MarkdownViewerVCL in '..\MarkdownViewerVCL.pas';
 
 var

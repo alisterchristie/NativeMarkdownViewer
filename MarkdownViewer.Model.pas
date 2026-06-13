@@ -41,6 +41,7 @@ type
     Number: Integer;
     IsTask: Boolean;
     TaskChecked: Boolean;
+    CodeLanguage: string;
     SourceStartLine: Integer;
     // Maps each character of Text back to its 0-based offset in the original
     // document (FMarkdown.Text). SourceMap[i] is the offset of Text[i+1];
