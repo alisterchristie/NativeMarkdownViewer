@@ -166,6 +166,7 @@ type
     procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Integer); override;
     procedure MouseMove(Shift: TShiftState; X, Y: Integer); override;
     procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: Integer); override;
+    procedure DblClick; override;
     procedure Paint; override;
     procedure Resize; override;
     procedure SetStyleElements(const Value: TStyleElements); override;
@@ -187,6 +188,7 @@ type
     procedure ToggleItalic;
     procedure ToggleStrikethrough;
     procedure ToggleInlineCode;
+    procedure SelectWordAtCaret;
     function AsHtml: string;
     function AsHtmlDocument(const ATitle: string = ''): string;
     property MarkdownText: string read GetMarkdownText write SetMarkdownText;
@@ -3182,6 +3184,40 @@ end;
 procedure TMarkDownViewer.ToggleInlineCode;
 begin
   ToggleInlineFormat('`');
+end;
+
+// Select the run of non-whitespace characters around the caret (the word under
+// it), as on a double-click. Does nothing when the caret is on whitespace.
+procedure TMarkDownViewer.SelectWordAtCaret;
+var
+  L: Integer;
+  R: Integer;
+  function IsBreak(Index: Integer): Boolean;
+  begin
+    Result := (Index < 1) or (Index > Length(FSelectableText)) or
+      CharInSet(FSelectableText[Index], [' ', #9, #13, #10]);
+  end;
+begin
+  if FSelectableText = '' then
+    Repaint;
+  L := EnsureRange(FSelectionCaret, 0, Length(FSelectableText));
+  R := L;
+  while (L > 0) and not IsBreak(L) do
+    Dec(L);
+  while (R < Length(FSelectableText)) and not IsBreak(R + 1) do
+    Inc(R);
+  if R <= L then
+    Exit;
+  FSelectionAnchor := L;
+  FSelectionCaret := R;
+  FDesiredCaretX := -1;
+  Invalidate;
+end;
+
+procedure TMarkDownViewer.DblClick;
+begin
+  inherited DblClick;
+  SelectWordAtCaret;
 end;
 
 // The current document rendered as an HTML fragment, using the same parser the

@@ -177,6 +177,8 @@ type
     procedure ToggleStrikethroughWrapsSelection;
     [Test]
     procedure ToggleBoldMethodMatchesShortcut;
+    [Test]
+    procedure SelectWordAtCaretSelectsWord;
   end;
 
 implementation
@@ -1395,6 +1397,22 @@ begin
   FViewer.ToggleBold;
 
   Assert.AreEqual('**word**', Trim(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.SelectWordAtCaretSelectsWord;
+var
+  I: Integer;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'alpha bravo charlie';
+  RepaintViewer;
+
+  // Move the caret into the middle word, then select it.
+  for I := 1 to 8 do
+    FViewer.PressKey(VK_RIGHT);
+  FViewer.SelectWordAtCaret;
+
+  Assert.AreEqual('bravo', FViewer.SelectedText);
 end;
 
 initialization
