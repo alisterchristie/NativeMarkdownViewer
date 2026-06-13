@@ -80,7 +80,7 @@ type
       const AMarkdownText: string = ''; AHasSource: Boolean = True;
       const ASourceMap: TArray<Integer> = nil);
     procedure AddSelectableBreak(AHasSource: Boolean = True;
-      ASourceStart: Integer = -1);
+      ASourceStart: Integer = -1; AForce: Boolean = False);
     procedure DrawCaret;
     function SelectionRange(out SelStart, SelEnd: Integer): Boolean;
     procedure DrawSelectionBackground(const AText: string;
@@ -96,6 +96,7 @@ type
     procedure CopySelectionToClipboard(PlainText: Boolean);
     procedure DeleteSelectionOrCharacter(Backwards: Boolean);
     procedure InsertTextAtSelection(const Value: string);
+    procedure InsertNewLine;
     procedure ToggleInlineFormat(const AMarker: string);
     function WrapSelectionWith(const AOpen, AClose: string): Boolean;
     procedure InvalidateLayout;
@@ -731,7 +732,7 @@ begin
       Key := #0;
     #13:
       begin
-        InsertTextAtSelection(sLineBreak);
+        InsertNewLine;
         Key := #0;
       end;
     #32..#65535:
@@ -1059,6 +1060,87 @@ begin
 
   ApplyMarkdownText(SourceText);
   FinishEditAtSource(NewSourceCaret);
+end;
+
+// Insert a line break, continuing a list or block quote the caret sits in: the
+// bullet/number/quote marker carries to the next line (ordered numbers
+// increment); pressing Enter on an empty item clears its marker to leave the
+// construct. Plain lines just get a line break.
+procedure TMarkDownViewer.InsertNewLine;
+var
+  OldSourcePos: Integer;
+  LineIdx: Integer;
+  Line: string;
+  Lead: string;
+  T: string;
+  Content: string;
+  Prefix: string;
+  I: Integer;
+  Num: Integer;
+begin
+  if HasSelection then
+  begin
+    InsertTextAtSelection(sLineBreak);
+    Exit;
+  end;
+
+  OldSourcePos := SelectableToSourcePosition(FSelectionCaret);
+  LineIdx := SourcePosToLine(OldSourcePos);
+  if (LineIdx < 0) or (LineIdx >= FMarkdown.Count) then
+  begin
+    InsertTextAtSelection(sLineBreak);
+    Exit;
+  end;
+
+  Line := FMarkdown[LineIdx];
+  T := TMarkDownBlockParser.TrimLeftOnly(Line);
+  Lead := Copy(Line, 1, Length(Line) - Length(T));
+  Prefix := '';
+  Content := '';
+
+  if (Length(T) >= 2) and CharInSet(T[1], ['-', '*', '+']) and (T[2] = ' ') then
+  begin
+    Content := Copy(T, 3, MaxInt);
+    if (Copy(Content, 1, 4) = '[ ] ') or (Copy(Content, 1, 4) = '[x] ') or
+      (Copy(Content, 1, 4) = '[X] ') then
+    begin
+      Content := Copy(Content, 5, MaxInt);
+      Prefix := Lead + T[1] + ' [ ] '; // continue as a new unchecked task
+    end
+    else
+      Prefix := Lead + T[1] + ' ';
+  end
+  else
+  begin
+    I := 1;
+    while (I <= Length(T)) and CharInSet(T[I], ['0'..'9']) do
+      Inc(I);
+    if (I > 1) and (I < Length(T)) and (T[I] = '.') and (T[I + 1] = ' ') then
+    begin
+      Num := StrToIntDef(Copy(T, 1, I - 1), 0);
+      Content := Copy(T, I + 2, MaxInt);
+      Prefix := Lead + IntToStr(Num + 1) + '. ';
+    end;
+    // Block quotes merge consecutive '>' lines into one block, so the continued
+    // empty line has no caret anchor; leave them to a plain line break.
+  end;
+
+  if Prefix = '' then
+  begin
+    InsertTextAtSelection(sLineBreak);
+    Exit;
+  end;
+
+  if Trim(Content) = '' then
+  begin
+    // Empty item: clear the marker to leave the construct.
+    PushUndoState;
+    ApplyMarkdownLine(LineIdx, '');
+    FinishEditAtSource(LineStartSourcePos(LineIdx));
+    Exit;
+  end;
+
+  InsertTextAtSelection(sLineBreak + Prefix);
 end;
 
 // Wrap the selection in AMarker (e.g. '**' for bold, '*' for italic), or unwrap
@@ -1904,14 +1986,17 @@ end;
 // table rows passes ASourceStart - the document offset of the line break it
 // stands for - so it maps exactly without the FindSourceStart heuristic.
 procedure TMarkDownViewer.AddSelectableBreak(AHasSource: Boolean;
-  ASourceStart: Integer);
+  ASourceStart: Integer; AForce: Boolean);
 var
   Map: TArray<Integer>;
   K: Integer;
 begin
   if FSelectableText = '' then
     Exit;
-  if EndsText(sLineBreak, FSelectableText) then
+  // AForce keeps a break that would otherwise collapse onto the previous one,
+  // so an empty block (e.g. a freshly continued list item) keeps a distinct
+  // selectable position the caret can occupy.
+  if (not AForce) and EndsText(sLineBreak, FSelectableText) then
     Exit;
   if ASourceStart >= 0 then
   begin
@@ -2135,7 +2220,8 @@ var
 
   function DrawInline(ATokens: TMarkDownInlineList; ALeft, ATop, AWidth: Integer; ADraw: Boolean;
     BaseStyle: TFontStyles = []; SizeDelta: Integer = 0;
-    AAlignment: TAlignment = taLeftJustify; const AMarkdownLinePrefix: string = ''): Integer;
+    AAlignment: TAlignment = taLeftJustify; const AMarkdownLinePrefix: string = '';
+    AEmitAnchor: Boolean = False): Integer;
   var
     TokenIndex: Integer;
     AtomIndex: Integer;
@@ -2143,6 +2229,8 @@ var
     LineUsed: Integer;
     X: Integer;
     YPos: Integer;
+    StartLen: Integer;
+    AnchorRun: TMarkDownTextRun;
     Atom: string;
     AtomWidth: Integer;
     AtomRect: TRect;
@@ -2229,6 +2317,7 @@ var
     YPos := ATop;
     AssignBaseFont(BaseStyle, SizeDelta);
     LineHeight := Canvas.TextHeight('Wg') + 5;
+    StartLen := Length(FSelectableText);
     if ATokens.Count > 0 then
       X := AlignedX(0, 1)
     else
@@ -2304,6 +2393,20 @@ var
         Inc(X, AtomWidth);
         Inc(LineUsed, AtomWidth);
       end;
+    end;
+
+    // An empty block (e.g. a continued list item) draws no atoms, so add a
+    // zero-width run at the content position to give the caret a home there.
+    if ADraw and AEmitAnchor and (Length(FSelectableText) = StartLen) then
+    begin
+      AnchorRun := Default(TMarkDownTextRun);
+      AnchorRun.Rect := Rect(ALeft, ATop, ALeft, ATop + LineHeight);
+      AnchorRun.FontName := Canvas.Font.Name;
+      AnchorRun.FontSize := Canvas.Font.Size;
+      AnchorRun.FontStyle := Canvas.Font.Style;
+      AnchorRun.StartIndex := Length(FSelectableText);
+      AnchorRun.SourceStartIndex := -1;
+      FTextRuns.Add(AnchorRun);
     end;
 
     Result := YPos + LineHeight - ATop;
@@ -2591,7 +2694,7 @@ begin
           AssignBaseFont([fsBold], HeadingFontSizeDelta(Block.Level));
           Tokens := InlineTokensForBlock(Block);
           TokenHeight := DrawInline(Tokens, TextLeft, Y, ContentWidth, True, [fsBold],
-            HeadingFontSizeDelta(Block.Level), taLeftJustify, StringOfChar('#', Block.Level) + ' ');
+            HeadingFontSizeDelta(Block.Level), taLeftJustify, StringOfChar('#', Block.Level) + ' ', True);
           // Top-level headings get a subtle underline rule, like common renderers.
           if (Block.Level <= 2) and (GetEffectiveHeadingRuleColor <> clNone) then
           begin
@@ -2605,7 +2708,7 @@ begin
         begin
           Tokens := InlineTokensForBlock(Block);
           TokenHeight := DrawInline(Tokens, TextLeft + 13, Y, ContentWidth - 13, True,
-            [], 0, taLeftJustify, '> ');
+            [], 0, taLeftJustify, '> ', True);
           R := Rect(TextLeft, Y + 2, TextLeft + 4, Y + TokenHeight);
           CanvasState := TCanvasState.Save(Canvas);
           try
@@ -2666,7 +2769,7 @@ begin
           Tokens := InlineTokensForBlock(Block);
           TokenHeight := DrawInline(Tokens, ListLeft + TextIndent, Y,
             Max(10, ContentWidth - (ListLeft - TextLeft) - TextIndent), True,
-            [], 0, taLeftJustify, StringOfChar(' ', Max(0, Block.IndentLevel) * 2) + ListMarker);
+            [], 0, taLeftJustify, StringOfChar(' ', Max(0, Block.IndentLevel) * 2) + ListMarker, True);
           Inc(Y, TokenHeight + 3);
         end;
       bkImage:
@@ -2745,15 +2848,24 @@ begin
         end;
     else
       Tokens := InlineTokensForBlock(Block);
-      TokenHeight := DrawInline(Tokens, TextLeft, Y, ContentWidth, True);
+      TokenHeight := DrawInline(Tokens, TextLeft, Y, ContentWidth, True,
+        [], 0, taLeftJustify, '', True);
       Inc(Y, TokenHeight + ParagraphSpacing);
     end;
     Block.LayoutHeight := Y + FScrollPos - Block.LayoutTop;
     Block.LayoutWidth := ContentWidth;
-    // The break after a block maps to the line break following its last source
-    // character (the source map's end sentinel).
-    AddSelectableBreak(True,
-      SliceMapValue(Block.SourceMap, Length(Block.SourceMap) - 1));
+    if (Block.Text = '') and
+      (Block.Kind in [bkParagraph, bkHeading, bkQuote, bkListItem]) and
+      (Block.SourceStartLine >= 0) and (Block.SourceStartLine < FMarkdown.Count) then
+      // Empty content block: force a non-collapsing break whose source is the
+      // caret position just past the marker, so the anchor maps there.
+      AddSelectableBreak(True, LineStartSourcePos(Block.SourceStartLine) +
+        Length(FMarkdown[Block.SourceStartLine]), True)
+    else
+      // The break after a block maps to the line break following its last
+      // source character (the source map's end sentinel).
+      AddSelectableBreak(True,
+        SliceMapValue(Block.SourceMap, Length(Block.SourceMap) - 1));
   end;
 
   TotalHeight := Y + FScrollPos + MarkdownPadding;

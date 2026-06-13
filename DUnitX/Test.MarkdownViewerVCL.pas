@@ -179,6 +179,16 @@ type
     procedure ToggleBoldMethodMatchesShortcut;
     [Test]
     procedure SelectWordAtCaretSelectsWord;
+    [Test]
+    procedure EnterContinuesBulletList;
+    [Test]
+    procedure EnterIncrementsOrderedList;
+    [Test]
+    procedure EnterContinuesTaskAsUnchecked;
+    [Test]
+    procedure EnterOnEmptyItemExitsList;
+    [Test]
+    procedure EnterInMiddleOfListInsertsItem;
   end;
 
 implementation
@@ -1413,6 +1423,77 @@ begin
   FViewer.SelectWordAtCaret;
 
   Assert.AreEqual('bravo', FViewer.SelectedText);
+end;
+
+procedure TMarkDownViewerTests.EnterContinuesBulletList;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := '- one';
+  RepaintViewer;
+
+  FViewer.PressKey(VK_END);
+  FViewer.TypeCharacter(#13);
+  FViewer.TypeCharacter('t');
+  FViewer.TypeCharacter('w');
+  FViewer.TypeCharacter('o');
+
+  Assert.AreEqual('- one' + sLineBreak + '- two', Trim(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.EnterIncrementsOrderedList;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := '1. first';
+  RepaintViewer;
+
+  FViewer.PressKey(VK_END);
+  FViewer.TypeCharacter(#13);
+  FViewer.TypeCharacter('x');
+
+  Assert.AreEqual('1. first' + sLineBreak + '2. x', Trim(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.EnterContinuesTaskAsUnchecked;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := '- [x] done';
+  RepaintViewer;
+
+  FViewer.PressKey(VK_END);
+  FViewer.TypeCharacter(#13);
+  FViewer.TypeCharacter('y');
+
+  Assert.AreEqual('- [x] done' + sLineBreak + '- [ ] y',
+    Trim(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.EnterOnEmptyItemExitsList;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := '- ';
+  RepaintViewer;
+
+  FViewer.PressKey(VK_END);
+  FViewer.TypeCharacter(#13);
+
+  Assert.AreEqual('', Trim(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.EnterInMiddleOfListInsertsItem;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := '- one' + sLineBreak + '- three';
+  RepaintViewer;
+
+  // Caret at end of "one" (first item), Enter then type makes a middle item.
+  FViewer.PressKey(VK_END);
+  FViewer.TypeCharacter(#13);
+  FViewer.TypeCharacter('t');
+  FViewer.TypeCharacter('w');
+  FViewer.TypeCharacter('o');
+
+  Assert.AreEqual('- one' + sLineBreak + '- two' + sLineBreak + '- three',
+    Trim(FViewer.MarkdownText));
 end;
 
 initialization
