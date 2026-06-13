@@ -5,7 +5,8 @@ interface
 uses
   System.Generics.Collections,
   System.Types,
-  Vcl.Graphics;
+  Vcl.Graphics,
+  MarkdownViewer.Highlight;
 
 type
   TMarkDownBlockKind = (bkParagraph, bkHeading, bkQuote, bkListItem,
@@ -31,6 +32,9 @@ type
   TMarkDownInlineList = TList<TMarkDownInlineToken>;
 
   TMarkDownBlock = class
+  private
+    FHighlightTokens: TArray<TSourceToken>;
+    FHighlightComputed: Boolean;
   public
     Kind: TMarkDownBlockKind;
     Text: string;
@@ -56,6 +60,11 @@ type
     LayoutWidth: Integer;
     constructor Create;
     destructor Destroy; override;
+    // Syntax-highlight tokens for a code block, tokenized once on first request
+    // and cached for the block's lifetime (blocks are rebuilt on every parse,
+    // so the cache invalidates naturally). Returns nil when CodeLanguage has no
+    // registered highlighter, which signals the plain (unhighlighted) path.
+    function HighlightTokens: TArray<TSourceToken>;
   end;
 
   TMarkDownLinkHit = record
@@ -113,6 +122,22 @@ destructor TMarkDownBlock.Destroy;
 begin
   InlineTokens.Free;
   inherited Destroy;
+end;
+
+function TMarkDownBlock.HighlightTokens: TArray<TSourceToken>;
+var
+  Highlighter: IMarkdownSyntaxHighlighter;
+begin
+  if not FHighlightComputed then
+  begin
+    Highlighter := TMarkdownSyntaxHighlighterRegistry.GetHighlighter(CodeLanguage);
+    if Highlighter <> nil then
+      FHighlightTokens := Highlighter.Highlight(Text)
+    else
+      FHighlightTokens := nil;
+    FHighlightComputed := True;
+  end;
+  Result := FHighlightTokens;
 end;
 
 end.

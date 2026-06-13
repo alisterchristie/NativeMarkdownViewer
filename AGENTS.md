@@ -111,7 +111,10 @@ open the PNG. Prefer this over screenshotting the running demo.
   `TestTokenStreamInvariants*` tests enforce this for all languages; add new
   languages there. Token colours/styles are resolved per theme in
   `TMarkDownViewer` (`GetSyntaxColor`/`GetSyntaxStyle`, exposed via the
-  `SyntaxColors` property).
+  `SyntaxColors` property). Tokenization is cached per block via
+  `TMarkDownBlock.HighlightTokens` (computed once, invalidated when blocks are
+  rebuilt on reparse); the paint path must use that accessor rather than
+  re-tokenizing on every repaint.
 
 ## Git Commits
 

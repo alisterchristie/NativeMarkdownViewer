@@ -144,6 +144,12 @@ type
     procedure TestTokenStreamInvariantsAllLanguages;
     [Test]
     procedure TestTokenStreamInvariantsAdversarialInput;
+
+    // Cached per-block tokenization
+    [Test]
+    procedure TestBlockHighlightTokensMatchRegistry;
+    [Test]
+    procedure TestBlockHighlightTokensFallBackToNil;
   end;
 
 implementation
@@ -151,6 +157,7 @@ implementation
 uses
   System.SysUtils,
   System.Generics.Collections,
+  MarkdownViewer.Model,
   MarkdownViewer.Highlight;
 
 // Assert that a highlighter's output tiles the input exactly: tokens are
@@ -1285,6 +1292,70 @@ begin
     Assert.IsTrue(HL <> nil, 'missing highlighter: ' + Langs[L]);
     for S := 0 to High(Inputs) do
       AssertTokenStreamValid(HL, Inputs[S]);
+  end;
+end;
+
+// ---------------------------------------------------------------------------
+// Cached per-block tokenization
+// ---------------------------------------------------------------------------
+
+procedure TMarkdownHighlightTests.TestBlockHighlightTokensMatchRegistry;
+var
+  Block: TMarkDownBlock;
+  Cached, Direct, Again: TArray<TSourceToken>;
+  HL: IMarkdownSyntaxHighlighter;
+  I: Integer;
+begin
+  Block := TMarkDownBlock.Create;
+  try
+    Block.Kind := bkCodeBlock;
+    Block.CodeLanguage := 'pascal';
+    Block.Text := 'begin'#13#10'  WriteLn(''Hi'');'#13#10'end';
+
+    HL := TMarkdownSyntaxHighlighterRegistry.GetHighlighter('pascal');
+    Direct := HL.Highlight(Block.Text);
+
+    Cached := Block.HighlightTokens;
+    Assert.AreEqual(Length(Direct), Length(Cached));
+    for I := 0 to High(Direct) do
+    begin
+      Assert.AreEqual(Direct[I].Text, Cached[I].Text);
+      Assert.AreEqual(Direct[I].Offset, Cached[I].Offset);
+      Assert.AreEqual(Ord(Direct[I].Kind), Ord(Cached[I].Kind));
+    end;
+
+    // A second request returns the same cached tokens.
+    Again := Block.HighlightTokens;
+    Assert.AreEqual(Length(Cached), Length(Again));
+  finally
+    Block.Free;
+  end;
+end;
+
+procedure TMarkdownHighlightTests.TestBlockHighlightTokensFallBackToNil;
+var
+  Block: TMarkDownBlock;
+begin
+  // Unknown language -> nil, which signals the plain (unhighlighted) path.
+  Block := TMarkDownBlock.Create;
+  try
+    Block.Kind := bkCodeBlock;
+    Block.CodeLanguage := 'no_such_language';
+    Block.Text := 'plain text';
+    Assert.IsTrue(Block.HighlightTokens = nil);
+  finally
+    Block.Free;
+  end;
+
+  // No language tag -> nil as well.
+  Block := TMarkDownBlock.Create;
+  try
+    Block.Kind := bkCodeBlock;
+    Block.CodeLanguage := '';
+    Block.Text := 'plain text';
+    Assert.IsTrue(Block.HighlightTokens = nil);
+  finally
+    Block.Free;
   end;
 end;
 

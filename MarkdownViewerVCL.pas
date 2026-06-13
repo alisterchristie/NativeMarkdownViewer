@@ -3085,7 +3085,6 @@ var
   TextIndent: Integer;
   LineTextStart: Integer;
   OldBkMode: Integer;
-  Highlighter: IMarkdownSyntaxHighlighter;
   SyntaxTokens: TArray<TSourceToken>;
   TokenIndex: Integer;
   CurrentX: Integer;
@@ -3221,11 +3220,7 @@ begin
               Canvas.FillRect(R);
               Canvas.Brush.Style := bsClear;
               
-              Highlighter := TMarkdownSyntaxHighlighterRegistry.GetHighlighter(Block.CodeLanguage);
-              if Highlighter <> nil then
-                SyntaxTokens := Highlighter.Highlight(Block.Text)
-              else
-                SyntaxTokens := nil;
+              SyntaxTokens := Block.HighlightTokens;
 
               for LineIndex := 0 to Lines.Count - 1 do
               begin
