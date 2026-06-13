@@ -100,6 +100,9 @@ type
     procedure InvalidateLayout;
     procedure MarkdownChanged(Sender: TObject);
     procedure MoveCaret(Delta: Integer; ExtendSelection: Boolean);
+    function WordTarget(Direction: Integer): Integer;
+    procedure MoveCaretWord(Direction: Integer; ExtendSelection: Boolean);
+    procedure DeleteWord(Backwards: Boolean);
     procedure MoveCaretLineBoundary(ToEnd, ExtendSelection: Boolean);
     procedure MoveCaretPage(Direction: Integer; ExtendSelection: Boolean);
     procedure MoveCaretVertical(Direction: Integer; ExtendSelection: Boolean);
@@ -586,6 +589,26 @@ begin
         Result := False;
     VK_INSERT:
       CopySelectionToClipboard(True);
+    VK_LEFT:
+      if not FReadOnly then
+        MoveCaretWord(-1, ssShift in Shift)
+      else
+        Result := False;
+    VK_RIGHT:
+      if not FReadOnly then
+        MoveCaretWord(1, ssShift in Shift)
+      else
+        Result := False;
+    VK_BACK:
+      if not FReadOnly then
+        DeleteWord(True)
+      else
+        Result := False;
+    VK_DELETE:
+      if not FReadOnly then
+        DeleteWord(False)
+      else
+        Result := False;
     VK_HOME:
       if not FReadOnly then
         MoveCaretDocumentBoundary(False, ssShift in Shift)
@@ -1206,6 +1229,64 @@ begin
   FDesiredCaretX := -1;
   ScrollCaretIntoView;
   Invalidate;
+end;
+
+// The selectable position a word-wise move from the caret lands on: forward to
+// the start of the next word (over the rest of this word then whitespace), or
+// back to the start of the current/previous word.
+function TMarkDownViewer.WordTarget(Direction: Integer): Integer;
+  function IsBreak(Index: Integer): Boolean;
+  begin
+    Result := (Index < 1) or (Index > Length(FSelectableText)) or
+      CharInSet(FSelectableText[Index], [' ', #9, #13, #10]);
+  end;
+begin
+  Result := EnsureRange(FSelectionCaret, 0, Length(FSelectableText));
+  if Direction > 0 then
+  begin
+    while (Result < Length(FSelectableText)) and not IsBreak(Result + 1) do
+      Inc(Result);
+    while (Result < Length(FSelectableText)) and IsBreak(Result + 1) do
+      Inc(Result);
+  end
+  else
+  begin
+    while (Result > 0) and IsBreak(Result) do
+      Dec(Result);
+    while (Result > 0) and not IsBreak(Result) do
+      Dec(Result);
+  end;
+end;
+
+procedure TMarkDownViewer.MoveCaretWord(Direction: Integer;
+  ExtendSelection: Boolean);
+begin
+  if FSelectableText = '' then
+    Repaint;
+  SetCaret(WordTarget(Direction), ExtendSelection);
+  FDesiredCaretX := -1;
+  ScrollCaretIntoView;
+  Invalidate;
+end;
+
+procedure TMarkDownViewer.DeleteWord(Backwards: Boolean);
+begin
+  if FReadOnly then
+    Exit;
+  if FSelectableText = '' then
+    Repaint;
+  if HasSelection then
+  begin
+    InsertTextAtSelection('');
+    Exit;
+  end;
+  if Backwards then
+    FSelectionAnchor := WordTarget(-1)
+  else
+    FSelectionAnchor := WordTarget(1);
+  if FSelectionAnchor = FSelectionCaret then
+    Exit;
+  InsertTextAtSelection('');
 end;
 
 procedure TMarkDownViewer.MoveCaretDocumentBoundary(ToEnd,

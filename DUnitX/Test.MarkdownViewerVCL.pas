@@ -163,6 +163,12 @@ type
     procedure CtrlEWrapsSelectionInCode;
     [Test]
     procedure CtrlBBoldsPartialSelection;
+    [Test]
+    procedure CtrlRightMovesByWord;
+    [Test]
+    procedure CtrlBackspaceDeletesWord;
+    [Test]
+    procedure CtrlDeleteDeletesWordForward;
   end;
 
 implementation
@@ -1296,6 +1302,43 @@ begin
   FViewer.PressKey(Ord('B'), [ssCtrl]);
 
   Assert.AreEqual('alpha **bravo** charlie', Trim(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.CtrlRightMovesByWord;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'alpha bravo charlie';
+  RepaintViewer;
+
+  // From the start, Ctrl+Right then type marks the start of the second word.
+  FViewer.PressKey(VK_RIGHT, [ssCtrl]);
+  FViewer.TypeCharacter('-');
+
+  Assert.AreEqual('alpha -bravo charlie', Trim(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.CtrlBackspaceDeletesWord;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'alpha bravo charlie';
+  RepaintViewer;
+
+  FViewer.PressKey(VK_END);
+  FViewer.PressKey(VK_BACK, [ssCtrl]);
+
+  Assert.AreEqual('alpha bravo', Trim(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.CtrlDeleteDeletesWordForward;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'alpha bravo charlie';
+  RepaintViewer;
+
+  // Caret at start; Ctrl+Delete removes the first word (and the space).
+  FViewer.PressKey(VK_DELETE, [ssCtrl]);
+
+  Assert.AreEqual('bravo charlie', Trim(FViewer.MarkdownText));
 end;
 
 initialization
