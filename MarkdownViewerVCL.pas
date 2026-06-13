@@ -299,6 +299,7 @@ type
     procedure SelectAll;
     procedure Undo;
     procedure ChangeHeadingLevel(Delta: Integer);
+    procedure SetHeadingLevel(TargetLevel: Integer);
     procedure ChangeListIndent(Delta: Integer);
     procedure ToggleBold;
     procedure ToggleItalic;
@@ -1027,6 +1028,21 @@ begin
   case Key of
     Ord('A'):
       SelectAllText;
+    Ord('0'), VK_NUMPAD0:
+      if not FReadOnly then
+        SetHeadingLevel(0)
+      else
+        Result := False;
+    Ord('1')..Ord('6'), VK_NUMPAD1..VK_NUMPAD6:
+      if not FReadOnly then
+      begin
+        if (Key >= VK_NUMPAD1) and (Key <= VK_NUMPAD6) then
+          SetHeadingLevel(Key - VK_NUMPAD1 + 1)
+        else
+          SetHeadingLevel(Key - Ord('0'));
+      end
+      else
+        Result := False;
     Ord('B'):
       if not FReadOnly then
         ToggleBold
@@ -3883,6 +3899,130 @@ begin
   FDesiredCaretX := -1;
   ScrollCaretIntoView;
   Invalidate;
+end;
+
+procedure TMarkDownViewer.SetHeadingLevel(TargetLevel: Integer);
+var
+  Block: TMarkDownBlock;
+  LineIdx: Integer;
+  OldLine: string;
+  NewLine: string;
+  OldSourcePos: Integer;
+  NewSourcePos: Integer;
+  OldLevel: Integer;
+  OldPrefixLen: Integer;
+  NewPrefixLen: Integer;
+  PrefixDelta: Integer;
+  T: string;
+  LineStart: Integer;
+  UnderlineIdx: Integer;
+begin
+  if FReadOnly then Exit;
+  if FSelectableText = '' then Exit;
+  TargetLevel := EnsureRange(TargetLevel, 0, 6);
+
+  OldSourcePos := SelectableToSourcePosition(FSelectionCaret);
+  LineIdx := SourcePosToLine(OldSourcePos);
+  Block := GetBlockAtLine(LineIdx);
+  if Block = nil then Exit;
+
+  // If already at target level, do nothing
+  if (Block.Kind = bkParagraph) and (TargetLevel = 0) then Exit;
+  if (Block.Kind = bkHeading) and (Block.Level = TargetLevel) then Exit;
+
+  if (LineIdx < 0) or (LineIdx >= FMarkdown.Count) then Exit;
+
+  if TargetLevel = 0 then
+  begin
+    // Convert heading to paragraph (strip heading markers)
+    if Block.Kind <> bkHeading then Exit;
+    if (Block.SourceStartLine < 0) or (Block.SourceStartLine >= FMarkdown.Count) then Exit;
+
+    // Check if this is a setext heading (underline on next line)
+    UnderlineIdx := Block.SourceStartLine + 1;
+    if (UnderlineIdx < FMarkdown.Count) and
+       TMarkDownBlockParser.IsSetextUnderline(FMarkdown[UnderlineIdx], OldLevel) then
+    begin
+      // Strip underline
+      PushUndoState;
+      ApplyMarkdownLine(UnderlineIdx, '');
+      FinishEditAtSource(OldSourcePos);
+      Exit;
+    end;
+
+    // ATX heading
+    OldLine := FMarkdown[Block.SourceStartLine];
+    OldPrefixLen := GetHeadingPrefixLength(OldLine);
+    T := TMarkDownBlockParser.TrimLeftOnly(OldLine);
+    LineStart := Length(OldLine) - Length(T);
+    NewLine := Copy(OldLine, 1, LineStart) + Copy(T, OldPrefixLen + 1, MaxInt);
+
+    PushUndoState;
+    ApplyMarkdownLine(Block.SourceStartLine, NewLine);
+    NewSourcePos := Max(0, OldSourcePos - OldPrefixLen);
+    FinishEditAtSource(NewSourcePos);
+    Exit;
+  end;
+
+  // Convert paragraph (or other block) to heading, or change existing heading level
+  if Block.Kind <> bkHeading then
+  begin
+    // Convert paragraph to heading level TargetLevel
+    OldLine := FMarkdown[LineIdx];
+    NewLine := StringOfChar('#', TargetLevel) + ' ' + OldLine;
+    
+    PushUndoState;
+    ApplyMarkdownLine(LineIdx, NewLine);
+    NewSourcePos := Min(OldSourcePos + TargetLevel + 1,
+      LineStartSourcePos(LineIdx) + Length(NewLine));
+    FinishEditAtSource(NewSourcePos);
+    Exit;
+  end;
+
+  // Existing heading block - check if it's setext heading
+  UnderlineIdx := Block.SourceStartLine + 1;
+  if (UnderlineIdx < FMarkdown.Count) and
+     TMarkDownBlockParser.IsSetextUnderline(FMarkdown[UnderlineIdx], OldLevel) then
+  begin
+    // For setext headings: convert them to ATX heading first of the TargetLevel
+    OldLine := FMarkdown[Block.SourceStartLine];
+    NewLine := StringOfChar('#', TargetLevel) + ' ' + OldLine;
+    
+    PushUndoState;
+    // Remove the setext underline and update the header text line to ATX format
+    ApplyMarkdownLine(UnderlineIdx, '');
+    ApplyMarkdownLine(Block.SourceStartLine, NewLine);
+    NewSourcePos := Min(OldSourcePos + TargetLevel + 1,
+      LineStartSourcePos(Block.SourceStartLine) + Length(NewLine));
+    FinishEditAtSource(NewSourcePos);
+    Exit;
+  end;
+
+  // ATX heading - change existing # count
+  OldLine := FMarkdown[Block.SourceStartLine];
+  OldPrefixLen := GetHeadingPrefixLength(OldLine);
+  OldLevel := Block.Level;
+  
+  T := TMarkDownBlockParser.TrimLeftOnly(OldLine);
+  LineStart := Length(OldLine) - Length(T);
+  NewLine := Copy(OldLine, 1, LineStart) + StringOfChar('#', TargetLevel) +
+    Copy(T, OldLevel + 1, MaxInt);
+
+  if NewLine = OldLine then Exit;
+
+  NewPrefixLen := GetHeadingPrefixLength(NewLine);
+  PrefixDelta := NewPrefixLen - OldPrefixLen;
+
+  PushUndoState;
+  ApplyMarkdownLine(Block.SourceStartLine, NewLine);
+
+  if OldSourcePos >= LineStartSourcePos(Block.SourceStartLine) + OldPrefixLen then
+    NewSourcePos := OldSourcePos + PrefixDelta
+  else
+    NewSourcePos := OldSourcePos;
+  NewSourcePos := Min(NewSourcePos,
+    LineStartSourcePos(Block.SourceStartLine) + Length(NewLine));
+  FinishEditAtSource(NewSourcePos);
 end;
 
 procedure TMarkDownViewer.ChangeHeadingLevel(Delta: Integer);

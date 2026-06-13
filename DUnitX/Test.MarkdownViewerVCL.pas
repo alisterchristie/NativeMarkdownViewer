@@ -156,6 +156,10 @@ type
     [Test]
     procedure CtrlSpaceTogglesCheckbox;
     [Test]
+    procedure Ctrl1To6SetsHeadingLevel;
+    [Test]
+    procedure Ctrl0StripsHeading;
+    [Test]
     procedure TabOnHeadingPreservesCaretColumn;
     [Test]
     procedure ReadOnlyArrowKeysScroll;
@@ -1318,6 +1322,39 @@ begin
   // Toggle it back
   FViewer.PressKey(VK_SPACE, [ssCtrl]);
   Assert.AreEqual('- [ ] task', TrimRight(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.Ctrl1To6SetsHeadingLevel;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'Hello';
+  FViewer.ReadOnly := False;
+  RepaintViewer;
+
+  FViewer.PressKey(VK_HOME);
+  // Set to heading 1
+  FViewer.PressKey(Ord('1'), [ssCtrl]);
+  Assert.AreEqual('# Hello', TrimRight(FViewer.MarkdownText));
+
+  // Set to heading 3
+  FViewer.PressKey(Ord('3'), [ssCtrl]);
+  Assert.AreEqual('### Hello', TrimRight(FViewer.MarkdownText));
+
+  // Set to heading 6
+  FViewer.PressKey(Ord('6'), [ssCtrl]);
+  Assert.AreEqual('###### Hello', TrimRight(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.Ctrl0StripsHeading;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := '### Hello';
+  FViewer.ReadOnly := False;
+  RepaintViewer;
+
+  FViewer.PressKey(VK_HOME);
+  FViewer.PressKey(Ord('0'), [ssCtrl]);
+  Assert.AreEqual('Hello', TrimRight(FViewer.MarkdownText));
 end;
 
 procedure TMarkDownViewerTests.ReadOnlyArrowKeysScroll;
