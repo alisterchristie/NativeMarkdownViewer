@@ -173,6 +173,10 @@ type
     procedure TypingBracketWrapsSelection;
     [Test]
     procedure TypingCharWithoutSelectionInsertsLiterally;
+    [Test]
+    procedure ToggleStrikethroughWrapsSelection;
+    [Test]
+    procedure ToggleBoldMethodMatchesShortcut;
   end;
 
 implementation
@@ -1367,6 +1371,30 @@ begin
   FViewer.TypeCharacter('(');
 
   Assert.AreEqual('(ab', Trim(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.ToggleStrikethroughWrapsSelection;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'gone';
+  RepaintViewer;
+
+  FViewer.PressKey(Ord('A'), [ssCtrl]);
+  FViewer.ToggleStrikethrough;
+
+  Assert.AreEqual('~~gone~~', Trim(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.ToggleBoldMethodMatchesShortcut;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'word';
+  RepaintViewer;
+
+  FViewer.PressKey(Ord('A'), [ssCtrl]);
+  FViewer.ToggleBold;
+
+  Assert.AreEqual('**word**', Trim(FViewer.MarkdownText));
 end;
 
 initialization

@@ -183,6 +183,10 @@ type
     procedure SelectAll;
     procedure Undo;
     procedure ChangeHeadingLevel(Delta: Integer);
+    procedure ToggleBold;
+    procedure ToggleItalic;
+    procedure ToggleStrikethrough;
+    procedure ToggleInlineCode;
     function AsHtml: string;
     function AsHtmlDocument(const ATitle: string = ''): string;
     property MarkdownText: string read GetMarkdownText write SetMarkdownText;
@@ -548,17 +552,17 @@ begin
       SelectAllText;
     Ord('B'):
       if not FReadOnly then
-        ToggleInlineFormat('**')
+        ToggleBold
       else
         Result := False;
     Ord('I'):
       if not FReadOnly then
-        ToggleInlineFormat('*')
+        ToggleItalic
       else
         Result := False;
     Ord('E'):
       if not FReadOnly then
-        ToggleInlineFormat('`')
+        ToggleInlineCode
       else
         Result := False;
     Ord('C'):
@@ -3155,6 +3159,29 @@ end;
 procedure TMarkDownViewer.SelectAll;
 begin
   SelectAllText;
+end;
+
+// Inline-format commands, exposed so a host can drive them from a toolbar or
+// menu (the Ctrl+B/I/E shortcuts call these). Each wraps the selection in the
+// matching markdown markers, or removes them when already applied.
+procedure TMarkDownViewer.ToggleBold;
+begin
+  ToggleInlineFormat('**');
+end;
+
+procedure TMarkDownViewer.ToggleItalic;
+begin
+  ToggleInlineFormat('*');
+end;
+
+procedure TMarkDownViewer.ToggleStrikethrough;
+begin
+  ToggleInlineFormat('~~');
+end;
+
+procedure TMarkDownViewer.ToggleInlineCode;
+begin
+  ToggleInlineFormat('`');
 end;
 
 // The current document rendered as an HTML fragment, using the same parser the
