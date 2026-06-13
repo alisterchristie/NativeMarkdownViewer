@@ -1107,6 +1107,38 @@ begin
     Result := Trim(Copy(Result, 1, SpacePos - 1));
 end;
 
+function TryGetEmoji(const Code: string; out Emoji: string): Boolean;
+begin
+  Result := True;
+  if Code = 'smile' then Emoji := #$D83D#$DE0A
+  else if Code = 'warning' then Emoji := #$26A0#$FE0F
+  else if Code = 'check' then Emoji := #$D805#$DF05
+  else if Code = 'star' then Emoji := #$2B50
+  else if Code = 'fire' then Emoji := #$D83D#$DD25
+  else if Code = 'info' then Emoji := #$2139#$FE0F
+  else if Code = 'heart' then Emoji := #$2764#$FE0F
+  else if Code = 'thumbsup' then Emoji := #$D83D#$DC4D
+  else if Code = 'thumbsdown' then Emoji := #$D83D#$DC4E
+  else if Code = 'rocket' then Emoji := #$D83D#$DE80
+  else if Code = 'bulb' then Emoji := #$D83D#$DCA1
+  else if Code = 'lock' then Emoji := #$D83D#$DD12
+  else if Code = 'key' then Emoji := #$D83D#$DD11
+  else if Code = 'eyes' then Emoji := #$D83D#$DC40
+  else Result := False;
+end;
+
+function EmojiMap(const Map: TArray<Integer>; StartIdx, EndIdx, EmojiLen: Integer): TArray<Integer>;
+var
+  K: Integer;
+begin
+  if Length(Map) = 0 then
+    Exit(nil);
+  SetLength(Result, EmojiLen + 1);
+  for K := 0 to EmojiLen - 1 do
+    Result[K] := Map[StartIdx];
+  Result[EmojiLen] := Map[EndIdx];
+end;
+
 // Recursively splits Text into styled runs. BaseStyle and BaseUrl are inherited
 // from any enclosing emphasis or link span, so nested formatting accumulates
 // (e.g. bold text inside a link keeps both the bold style and the link url).
@@ -1202,6 +1234,25 @@ begin
             for C := 1 to Length(Decoded) do
               PushChar(Map[EntityStart - 1], Map[I - 1]); // whole &...; span
           Continue;
+        end;
+      end;
+
+      if Text[I] = ':' then
+      begin
+        J := I + 1;
+        while (J <= Length(Text)) and CharInSet(Text[J], ['a'..'z', 'A'..'Z', '0'..'9', '_', '-']) do
+          Inc(J);
+        if (J > I + 1) and (J <= Length(Text)) and (Text[J] = ':') then
+        begin
+          ReferenceName := Copy(Text, I + 1, J - I - 1);
+          if TryGetEmoji(ReferenceName, Decoded) then
+          begin
+            FlushBuffer;
+            AddRun(Tokens, Decoded, BaseStyle, False, BaseUrl,
+              EmojiMap(Map, I - 1, J, Length(Decoded)));
+            I := J + 1;
+            Continue;
+          end;
         end;
       end;
 

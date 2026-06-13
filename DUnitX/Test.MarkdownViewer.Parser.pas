@@ -137,6 +137,10 @@ type
     procedure SourceMapHandlesCodeBlock;
     [Test]
     procedure SourceMapHandlesTable;
+    [Test]
+    procedure ParseInlineParsesEmojiShortcodes;
+    [Test]
+    procedure TokenMapHandlesEmoji;
   end;
 
 implementation
@@ -1284,6 +1288,49 @@ begin
   finally
     Blocks.Free;
     Lines.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.ParseInlineParsesEmojiShortcodes;
+var
+  Tokens: TMarkDownInlineList;
+begin
+  Tokens := TMarkDownBlockParser.ParseInline('Hello :smile: world :warning:!');
+  try
+    Assert.AreEqual(5, Tokens.Count);
+    Assert.AreEqual('Hello ', Tokens[0].Text);
+    Assert.AreEqual(#$D83D#$DE0A, Tokens[1].Text);
+    Assert.AreEqual(' world ', Tokens[2].Text);
+    Assert.AreEqual(#$26A0#$FE0F, Tokens[3].Text);
+    Assert.AreEqual('!', Tokens[4].Text);
+  finally
+    Tokens.Free;
+  end;
+end;
+
+procedure TMarkDownParserTests.TokenMapHandlesEmoji;
+var
+  Tokens: TMarkDownInlineList;
+  Map: TArray<Integer>;
+  I: Integer;
+begin
+  SetLength(Map, 12);
+  for I := 0 to 11 do
+    Map[I] := I * 10;
+
+  Tokens := TMarkDownBlockParser.ParseInline('A :smile: B', nil, Map);
+  try
+    Assert.AreEqual(3, Tokens.Count);
+    Assert.AreEqual('A ', Tokens[0].Text);
+    Assert.AreEqual(#$D83D#$DE0A, Tokens[1].Text);
+    Assert.AreEqual(' B', Tokens[2].Text);
+
+    Assert.AreEqual(3, Length(Tokens[1].SourceMap));
+    Assert.AreEqual(20, Tokens[1].SourceMap[0]);
+    Assert.AreEqual(20, Tokens[1].SourceMap[1]);
+    Assert.AreEqual(90, Tokens[1].SourceMap[2]);
+  finally
+    Tokens.Free;
   end;
 end;
 
