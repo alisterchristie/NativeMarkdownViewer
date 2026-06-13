@@ -3042,7 +3042,7 @@ function TMarkDownViewer.DrawInline(ATokens: TMarkDownInlineList;
             if ATokens[TokenIndex].IsSuperscript then
               Dec(TextY, 3)
             else if ATokens[TokenIndex].IsSubscript then
-              Inc(TextY, 3);
+              Inc(TextY, 6);
             DrawSelectableText(Atom, X, TextY, TextStart);
             SetBkMode(Canvas.Handle, OldBkMode);
             if (ATokens[TokenIndex].Url <> '') and (Trim(Atom) <> '') and (FLinkHits <> nil) then
