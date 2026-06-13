@@ -145,6 +145,15 @@ type
     [Test]
     procedure TestTokenStreamInvariantsAdversarialInput;
 
+    [Test]
+    procedure TestLaTeXHighlighter;
+    [Test]
+    procedure TestPowerShellHighlighter;
+    [Test]
+    procedure TestBatchHighlighter;
+    [Test]
+    procedure TestVBHighlighter;
+
     // Cached per-block tokenization
     [Test]
     procedure TestBlockHighlightTokensMatchRegistry;
@@ -1224,10 +1233,11 @@ end;
 
 procedure TMarkdownHighlightTests.TestTokenStreamInvariantsAllLanguages;
 const
-  Langs: array[0..23] of string = (
+  Langs: array[0..33] of string = (
     'delphi', 'dfm', 'sql', 'c', 'cpp', 'csharp', 'java', 'js', 'ts', 'go',
     'rust', 'php', 'python', 'ruby', 'html', 'xml', 'css', 'json', 'yaml',
-    'sh', 'ini', 'pas', 'dpr', 'rb');
+    'sh', 'ini', 'pas', 'dpr', 'rb',
+    'latex', 'tex', 'powershell', 'ps1', 'batch', 'bat', 'cmd', 'vb', 'visualbasic', 'vbs');
   // A varied sample exercising strings, comments, numbers, symbols and
   // keywords. Run through every highlighter regardless of language so each
   // lexer must tile arbitrary input without gaps or zero-length tokens.
@@ -1255,10 +1265,11 @@ end;
 
 procedure TMarkdownHighlightTests.TestTokenStreamInvariantsAdversarialInput;
 const
-  Langs: array[0..23] of string = (
+  Langs: array[0..33] of string = (
     'delphi', 'dfm', 'sql', 'c', 'cpp', 'csharp', 'java', 'js', 'ts', 'go',
     'rust', 'php', 'python', 'ruby', 'html', 'xml', 'css', 'json', 'yaml',
-    'sh', 'ini', 'pas', 'dpr', 'rb');
+    'sh', 'ini', 'pas', 'dpr', 'rb',
+    'latex', 'tex', 'powershell', 'ps1', 'batch', 'bat', 'cmd', 'vb', 'visualbasic', 'vbs');
   // Inputs that historically broke naive lexers: lone delimiters, unterminated
   // strings and comments, bare symbols, and characters outside the keyword
   // sets. None may produce a gap, overlap or non-advancing token.
@@ -1357,6 +1368,62 @@ begin
   finally
     Block.Free;
   end;
+end;
+
+procedure TMarkdownHighlightTests.TestLaTeXHighlighter;
+var
+  HL: IMarkdownSyntaxHighlighter;
+  Tokens: TArray<TSourceToken>;
+begin
+  HL := TMarkdownSyntaxHighlighterRegistry.GetHighlighter('latex');
+  Assert.IsNotNull(HL);
+
+  Tokens := HL.Highlight('\begin{document} % comment'#13#10'LaTeX 123');
+  Assert.IsTrue(Length(Tokens) > 0);
+  Assert.AreEqual(stPreprocessor, Tokens[0].Kind);
+  Assert.AreEqual('\begin', Tokens[0].Text);
+end;
+
+procedure TMarkdownHighlightTests.TestPowerShellHighlighter;
+var
+  HL: IMarkdownSyntaxHighlighter;
+  Tokens: TArray<TSourceToken>;
+begin
+  HL := TMarkdownSyntaxHighlighterRegistry.GetHighlighter('powershell');
+  Assert.IsNotNull(HL);
+
+  Tokens := HL.Highlight('if ($x -eq 12) { Get-Process "chrome" # comment }');
+  Assert.IsTrue(Length(Tokens) > 0);
+  Assert.AreEqual(stKeyword, Tokens[0].Kind);
+  Assert.AreEqual('if', Tokens[0].Text);
+end;
+
+procedure TMarkdownHighlightTests.TestBatchHighlighter;
+var
+  HL: IMarkdownSyntaxHighlighter;
+  Tokens: TArray<TSourceToken>;
+begin
+  HL := TMarkdownSyntaxHighlighterRegistry.GetHighlighter('batch');
+  Assert.IsNotNull(HL);
+
+  Tokens := HL.Highlight('@echo off'#13#10'set %VAR%=12'#13#10'rem comment');
+  Assert.IsTrue(Length(Tokens) > 0);
+  Assert.AreEqual(stKeyword, Tokens[0].Kind);
+  Assert.AreEqual('@echo', Tokens[0].Text);
+end;
+
+procedure TMarkdownHighlightTests.TestVBHighlighter;
+var
+  HL: IMarkdownSyntaxHighlighter;
+  Tokens: TArray<TSourceToken>;
+begin
+  HL := TMarkdownSyntaxHighlighterRegistry.GetHighlighter('vb');
+  Assert.IsNotNull(HL);
+
+  Tokens := HL.Highlight('Dim x As Integer = 42 '' comment');
+  Assert.IsTrue(Length(Tokens) > 0);
+  Assert.AreEqual(stKeyword, Tokens[0].Kind);
+  Assert.AreEqual('Dim', Tokens[0].Text);
 end;
 
 initialization

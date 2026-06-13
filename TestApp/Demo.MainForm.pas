@@ -510,6 +510,51 @@ Driver=PostgreSQL
 ConnectionString=host=db.local;port=5432
 ```
 
+### LaTeX
+
+```latex
+\documentclass{article}
+\begin{document}
+% This is a LaTeX comment
+\section{Introduction}
+Hello World! $x^2 + y^2 = z^2$
+\end{document}
+```
+
+### PowerShell
+
+```powershell
+# Get all running processes named "chrome"
+$Processes = Get-Process -Name "chrome" -ErrorAction SilentlyContinue
+if ($Processes -ne $null) {
+    Write-Host "Chrome is running!" -ForegroundColor Green
+} else {
+    Write-Warning "Chrome is not running."
+}
+```
+
+### Batch / CMD
+
+```batch
+@echo off
+rem This is a batch file comment
+set TARGET_DIR=C:\Backup
+if not exist "%TARGET_DIR%" (
+    echo Creating directory %TARGET_DIR%
+    mkdir "%TARGET_DIR%"
+)
+```
+
+### Visual Basic
+
+```vb
+' Calculate the area of a circle
+Dim radius As Double = 5.0
+Const Pi As Double = 3.14159
+Dim area As Double = Pi * radius ^ 2
+Console.WriteLine("Area: " & area)
+```
+
 ---
 
 Use the find box above to highlight matches, then press **Enter** for the next match or **Shift+Enter** for the previous one.

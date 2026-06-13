@@ -154,6 +154,43 @@ type
     function Highlight(const AText: string): TArray<TSourceToken>;
   end;
 
+  TLaTeXSyntaxHighlighter = class(TInterfacedObject, IMarkdownSyntaxHighlighter)
+  public
+    function GetLanguageName: string;
+    function Highlight(const AText: string): TArray<TSourceToken>;
+  end;
+
+  TPowerShellSyntaxHighlighter = class(TInterfacedObject, IMarkdownSyntaxHighlighter)
+  private
+    FKeywords: THashSet<string>;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    function GetLanguageName: string;
+    function Highlight(const AText: string): TArray<TSourceToken>;
+  end;
+
+  TBatchSyntaxHighlighter = class(TInterfacedObject, IMarkdownSyntaxHighlighter)
+  private
+    FKeywords: THashSet<string>;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    function GetLanguageName: string;
+    function Highlight(const AText: string): TArray<TSourceToken>;
+  end;
+
+  TVBSyntaxHighlighter = class(TInterfacedObject, IMarkdownSyntaxHighlighter)
+  private
+    FKeywords: THashSet<string>;
+    FTypes: THashSet<string>;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    function GetLanguageName: string;
+    function Highlight(const AText: string): TArray<TSourceToken>;
+  end;
+
 implementation
 
 { TMarkdownSyntaxHighlighterRegistry }
@@ -428,6 +465,23 @@ begin
   RegisterHighlighter('ini', GenHL);
   RegisterHighlighter('cfg', GenHL);
   RegisterHighlighter('conf', GenHL);
+
+  RegisterHighlighter('latex', TLaTeXSyntaxHighlighter.Create);
+  RegisterHighlighter('tex', TLaTeXSyntaxHighlighter.Create);
+
+  RegisterHighlighter('powershell', TPowerShellSyntaxHighlighter.Create);
+  RegisterHighlighter('ps1', TPowerShellSyntaxHighlighter.Create);
+  RegisterHighlighter('psd1', TPowerShellSyntaxHighlighter.Create);
+  RegisterHighlighter('psm1', TPowerShellSyntaxHighlighter.Create);
+
+  RegisterHighlighter('batch', TBatchSyntaxHighlighter.Create);
+  RegisterHighlighter('bat', TBatchSyntaxHighlighter.Create);
+  RegisterHighlighter('cmd', TBatchSyntaxHighlighter.Create);
+
+  RegisterHighlighter('vb', TVBSyntaxHighlighter.Create);
+  RegisterHighlighter('visualbasic', TVBSyntaxHighlighter.Create);
+  RegisterHighlighter('vbnet', TVBSyntaxHighlighter.Create);
+  RegisterHighlighter('vbs', TVBSyntaxHighlighter.Create);
 end;
 
 class destructor TMarkdownSyntaxHighlighterRegistry.Destroy;
@@ -3120,6 +3174,697 @@ begin
       // 7. Grouping and assignment symbols
       if CharInSet(AText[I], ['=', ':', ',', '.', '<', '>', '(', ')',
         '[', ']', '{', '}', '+', '-']) then
+      begin
+        Inc(I);
+        AddToken(stSymbol, I - StartPos);
+        Continue;
+      end;
+
+      // Fallback
+      Inc(I);
+      AddToken(stPlain, I - StartPos);
+    end;
+    Result := Tokens.ToArray;
+  finally
+    Tokens.Free;
+  end;
+end;
+
+const
+  PSKeywords: array[0..29] of string = (
+    'if', 'else', 'elseif', 'for', 'foreach', 'while', 'do', 'until', 'switch',
+    'begin', 'process', 'end', 'function', 'filter', 'workflow', 'class', 'enum',
+    'try', 'catch', 'finally', 'throw', 'return', 'exit', 'break', 'continue',
+    'in', 'param', 'using', 'dynamicparam', 'trap'
+  );
+
+  BatchKeywords: array[0..22] of string = (
+    'echo', 'set', 'if', 'else', 'for', 'in', 'do', 'goto', 'call', 'exit',
+    'pause', 'rem', 'cls', 'copy', 'del', 'move', 'mkdir', 'rmdir', 'type',
+    'pushd', 'popd', 'setlocal', 'endlocal'
+  );
+
+  VBKeywords: array[0..132] of string = (
+    'addhandler', 'addressof', 'alias', 'and', 'andalso', 'as', 'byref',
+    'byval', 'call', 'case', 'catch', 'cbool', 'cbyte', 'cchar', 'cdate',
+    'cdbl', 'cdec', 'cint', 'clng', 'cobj', 'const', 'continue', 'csbyte',
+    'cshort', 'csng', 'cstr', 'ctype', 'cushort', 'cuint', 'culng', 'declare',
+    'default', 'delegate', 'dim', 'directcast', 'do', 'each', 'else', 'elseif',
+    'end', 'enum', 'erase', 'error', 'event', 'exit', 'false', 'finally',
+    'for', 'friend', 'function', 'get', 'gettype', 'getxmlnamespace',
+    'global', 'gosub', 'goto', 'handles', 'if', 'implements', 'imports', 'in',
+    'inherits', 'is', 'isnot', 'let', 'lib', 'like', 'loop', 'me', 'mod',
+    'module', 'mustinherit', 'mustoverride', 'mybase', 'myclass', 'namespace',
+    'narrowing', 'new', 'next', 'not', 'nothing', 'notinheritable',
+    'notoverridable', 'of', 'on', 'operator', 'option', 'optional', 'or',
+    'orelse', 'out', 'overloads', 'overridable', 'overrides', 'paramarray',
+    'partial', 'private', 'property', 'protected', 'public', 'raiseevent',
+    'readonly', 'redim', 'rem', 'removehandler', 'resume', 'return', 'select',
+    'set', 'shadows', 'shared', 'step', 'stop', 'structure', 'sub',
+    'synclock', 'then', 'throw', 'to', 'true', 'try', 'trycast', 'typeof',
+    'using', 'wend', 'when', 'where', 'while', 'widening', 'with',
+    'withevents', 'writeonly', 'xor'
+  );
+
+  VBTypes: array[0..15] of string = (
+    'boolean', 'byte', 'char', 'date', 'decimal', 'double', 'integer',
+    'long', 'object', 'sbyte', 'short', 'single', 'string', 'uinteger',
+    'ulong', 'ushort'
+  );
+
+{ TLaTeXSyntaxHighlighter }
+
+function TLaTeXSyntaxHighlighter.GetLanguageName: string;
+begin
+  Result := 'LaTeX';
+end;
+
+function TLaTeXSyntaxHighlighter.Highlight(const AText: string): TArray<TSourceToken>;
+var
+  Tokens: TList<TSourceToken>;
+  I, N: Integer;
+  StartPos: Integer;
+
+  procedure AddToken(AKind: TSourceTokenKind; ALength: Integer);
+  var
+    Token: TSourceToken;
+  begin
+    if ALength <= 0 then Exit;
+    Token.Text := Copy(AText, StartPos, ALength);
+    Token.Kind := AKind;
+    Token.Offset := StartPos - 1;
+    Tokens.Add(Token);
+    I := StartPos + ALength;
+  end;
+
+begin
+  Tokens := TList<TSourceToken>.Create;
+  try
+    I := 1;
+    N := Length(AText);
+    while I <= N do
+    begin
+      StartPos := I;
+
+      // 1. Whitespace
+      if CharInSet(AText[I], [' ', #9, #13, #10]) then
+      begin
+        while (I <= N) and CharInSet(AText[I], [' ', #9, #13, #10]) do
+          Inc(I);
+        AddToken(stPlain, I - StartPos);
+        Continue;
+      end;
+
+      // 2. Comments (%)
+      if AText[I] = '%' then
+      begin
+        Inc(I);
+        while (I <= N) and not CharInSet(AText[I], [#13, #10]) do
+          Inc(I);
+        AddToken(stComment, I - StartPos);
+        Continue;
+      end;
+
+      // 3. LaTeX commands (\commandname or \singlechar)
+      if AText[I] = '\' then
+      begin
+        Inc(I);
+        if I <= N then
+        begin
+          if CharInSet(AText[I], ['a'..'z', 'A'..'Z']) then
+          begin
+            while (I <= N) and CharInSet(AText[I], ['a'..'z', 'A'..'Z']) do
+              Inc(I);
+          end
+          else
+          begin
+            Inc(I);
+          end;
+        end;
+        AddToken(stPreprocessor, I - StartPos);
+        Continue;
+      end;
+
+      // 4. Numbers
+      if CharInSet(AText[I], ['0'..'9']) then
+      begin
+        while (I <= N) and CharInSet(AText[I], ['0'..'9']) do
+          Inc(I);
+        AddToken(stNumber, I - StartPos);
+        Continue;
+      end;
+
+      // 5. Delimiters and math symbols
+      if CharInSet(AText[I], ['{', '}', '[', ']', '$', '&', '_', '^', '=', '~']) then
+      begin
+        Inc(I);
+        AddToken(stSymbol, I - StartPos);
+        Continue;
+      end;
+
+      // Fallback
+      Inc(I);
+      AddToken(stPlain, I - StartPos);
+    end;
+    Result := Tokens.ToArray;
+  finally
+    Tokens.Free;
+  end;
+end;
+
+{ TPowerShellSyntaxHighlighter }
+
+constructor TPowerShellSyntaxHighlighter.Create;
+var
+  K: string;
+begin
+  inherited Create;
+  FKeywords := THashSet<string>.Create;
+  for K in PSKeywords do
+    FKeywords.Add(K);
+end;
+
+destructor TPowerShellSyntaxHighlighter.Destroy;
+begin
+  FKeywords.Free;
+  inherited Destroy;
+end;
+
+function TPowerShellSyntaxHighlighter.GetLanguageName: string;
+begin
+  Result := 'PowerShell';
+end;
+
+function TPowerShellSyntaxHighlighter.Highlight(const AText: string): TArray<TSourceToken>;
+var
+  Tokens: TList<TSourceToken>;
+  I, N: Integer;
+  StartPos: Integer;
+
+  procedure AddToken(AKind: TSourceTokenKind; ALength: Integer);
+  var
+    Token: TSourceToken;
+  begin
+    if ALength <= 0 then Exit;
+    Token.Text := Copy(AText, StartPos, ALength);
+    Token.Kind := AKind;
+    Token.Offset := StartPos - 1;
+    Tokens.Add(Token);
+    I := StartPos + ALength;
+  end;
+
+  function IsKeyword(const S: string): Boolean;
+  begin
+    Result := FKeywords.Contains(LowerCase(S));
+  end;
+
+begin
+  Tokens := TList<TSourceToken>.Create;
+  try
+    I := 1;
+    N := Length(AText);
+    while I <= N do
+    begin
+      StartPos := I;
+
+      // 1. Whitespace
+      if CharInSet(AText[I], [' ', #9, #13, #10]) then
+      begin
+        while (I <= N) and CharInSet(AText[I], [' ', #9, #13, #10]) do
+          Inc(I);
+        AddToken(stPlain, I - StartPos);
+        Continue;
+      end;
+
+      // 2. Block Comment <# ... #>
+      if (I + 1 <= N) and (AText[I] = '<') and (AText[I+1] = '#') then
+      begin
+        I := I + 2;
+        while I <= N do
+        begin
+          if (I + 1 <= N) and (AText[I] = '#') and (AText[I+1] = '>') then
+          begin
+            I := I + 2;
+            Break;
+          end;
+          Inc(I);
+        end;
+        AddToken(stComment, I - StartPos);
+        Continue;
+      end;
+
+      // 3. Line Comment #
+      if AText[I] = '#' then
+      begin
+        Inc(I);
+        while (I <= N) and not CharInSet(AText[I], [#13, #10]) do
+          Inc(I);
+        AddToken(stComment, I - StartPos);
+        Continue;
+      end;
+
+      // 4. Variables
+      if AText[I] = '$' then
+      begin
+        Inc(I);
+        if (I <= N) and (CharInSet(AText[I], ['a'..'z', 'A'..'Z', '_', '?']) or (Ord(AText[I]) > 127)) then
+        begin
+          while (I <= N) and (CharInSet(AText[I], ['a'..'z', 'A'..'Z', '0'..'9', '_', ':']) or (Ord(AText[I]) > 127)) do
+            Inc(I);
+        end;
+        AddToken(stType, I - StartPos);
+        Continue;
+      end;
+
+      // 5. Strings: Double quotes with backtick escapes
+      if AText[I] = '"' then
+      begin
+        Inc(I);
+        while I <= N do
+        begin
+          if AText[I] = '`' then
+          begin
+            Inc(I);
+            if I <= N then Inc(I);
+          end
+          else if AText[I] = '"' then
+          begin
+            Inc(I);
+            Break;
+          end
+          else if CharInSet(AText[I], [#13, #10]) then
+            Break
+          else
+            Inc(I);
+        end;
+        AddToken(stString, I - StartPos);
+        Continue;
+      end;
+
+      // 6. Strings: Single quotes
+      if AText[I] = '''' then
+      begin
+        Inc(I);
+        while I <= N do
+        begin
+          if AText[I] = '''' then
+          begin
+            Inc(I);
+            if (I <= N) and (AText[I] = '''') then
+              Inc(I)
+            else
+              Break;
+          end
+          else if CharInSet(AText[I], [#13, #10]) then
+            Break
+          else
+            Inc(I);
+        end;
+        AddToken(stString, I - StartPos);
+        Continue;
+      end;
+
+      // 7. Numbers
+      if CharInSet(AText[I], ['0'..'9']) then
+      begin
+        if (I + 1 <= N) and (AText[I] = '0') and (CharInSet(AText[I+1], ['x', 'X'])) then
+        begin
+          I := I + 2;
+          while (I <= N) and CharInSet(AText[I], ['0'..'9', 'a'..'f', 'A'..'F']) do
+            Inc(I);
+        end
+        else
+        begin
+          while (I <= N) and CharInSet(AText[I], ['0'..'9', '.']) do
+            Inc(I);
+        end;
+        if (I + 1 <= N) and SameText(Copy(AText, I, 2), 'kb') then I := I + 2
+        else if (I + 1 <= N) and SameText(Copy(AText, I, 2), 'mb') then I := I + 2
+        else if (I + 1 <= N) and SameText(Copy(AText, I, 2), 'gb') then I := I + 2
+        else if (I + 1 <= N) and SameText(Copy(AText, I, 2), 'tb') then I := I + 2
+        else if (I + 1 <= N) and SameText(Copy(AText, I, 2), 'pb') then I := I + 2;
+
+        AddToken(stNumber, I - StartPos);
+        Continue;
+      end;
+
+      // 8. Cmdlets, operators, keywords, parameters, and identifiers
+      if CharInSet(AText[I], ['a'..'z', 'A'..'Z', '_', '-']) or (Ord(AText[I]) > 127) then
+      begin
+        while (I <= N) and (CharInSet(AText[I], ['a'..'z', 'A'..'Z', '0'..'9', '_', '-', ':']) or (Ord(AText[I]) > 127)) do
+          Inc(I);
+
+        if IsKeyword(Copy(AText, StartPos, I - StartPos)) then
+          AddToken(stKeyword, I - StartPos)
+        else if (AText[StartPos] = '-') and ((StartPos + 1 > N) or not CharInSet(AText[StartPos + 1], ['0'..'9'])) then
+          AddToken(stPreprocessor, I - StartPos)
+        else if Pos('-', Copy(AText, StartPos, I - StartPos)) > 0 then
+          AddToken(stKeyword, I - StartPos)
+        else
+          AddToken(stPlain, I - StartPos);
+        Continue;
+      end;
+
+      // 9. Operators / symbols
+      if CharInSet(AText[I], ['=', '+', '*', '/', '%', '!', '<', '>', '&', '|',
+        ';', ',', '.', '(', ')', '{', '}', '[', ']']) then
+      begin
+        Inc(I);
+        AddToken(stSymbol, I - StartPos);
+        Continue;
+      end;
+
+      // Fallback
+      Inc(I);
+      AddToken(stPlain, I - StartPos);
+    end;
+    Result := Tokens.ToArray;
+  finally
+    Tokens.Free;
+  end;
+end;
+
+{ TBatchSyntaxHighlighter }
+
+constructor TBatchSyntaxHighlighter.Create;
+var
+  K: string;
+begin
+  inherited Create;
+  FKeywords := THashSet<string>.Create;
+  for K in BatchKeywords do
+    FKeywords.Add(K);
+end;
+
+destructor TBatchSyntaxHighlighter.Destroy;
+begin
+  FKeywords.Free;
+  inherited Destroy;
+end;
+
+function TBatchSyntaxHighlighter.GetLanguageName: string;
+begin
+  Result := 'Batch';
+end;
+
+function TBatchSyntaxHighlighter.Highlight(const AText: string): TArray<TSourceToken>;
+var
+  Tokens: TList<TSourceToken>;
+  I, N: Integer;
+  StartPos: Integer;
+
+  procedure AddToken(AKind: TSourceTokenKind; ALength: Integer);
+  var
+    Token: TSourceToken;
+  begin
+    if ALength <= 0 then Exit;
+    Token.Text := Copy(AText, StartPos, ALength);
+    Token.Kind := AKind;
+    Token.Offset := StartPos - 1;
+    Tokens.Add(Token);
+    I := StartPos + ALength;
+  end;
+
+  function IsKeyword(const S: string): Boolean;
+  begin
+    Result := FKeywords.Contains(LowerCase(S));
+  end;
+
+begin
+  Tokens := TList<TSourceToken>.Create;
+  try
+    I := 1;
+    N := Length(AText);
+    while I <= N do
+    begin
+      StartPos := I;
+
+      // 1. Whitespace
+      if CharInSet(AText[I], [' ', #9, #13, #10]) then
+      begin
+        while (I <= N) and CharInSet(AText[I], [' ', #9, #13, #10]) do
+          Inc(I);
+        AddToken(stPlain, I - StartPos);
+        Continue;
+      end;
+
+      // 2. :: Comments
+      if (I + 1 <= N) and (AText[I] = ':') and (AText[I+1] = ':') then
+      begin
+        I := I + 2;
+        while (I <= N) and not CharInSet(AText[I], [#13, #10]) do
+          Inc(I);
+        AddToken(stComment, I - StartPos);
+        Continue;
+      end;
+
+      // 3. Double Quoted Strings
+      if AText[I] = '"' then
+      begin
+        Inc(I);
+        while (I <= N) and (AText[I] <> '"') and not CharInSet(AText[I], [#13, #10]) do
+          Inc(I);
+        if (I <= N) and (AText[I] = '"') then
+          Inc(I);
+        AddToken(stString, I - StartPos);
+        Continue;
+      end;
+
+      // 4. Variables (%var% or %1 or %%i or !var!)
+      if AText[I] = '%' then
+      begin
+        Inc(I);
+        if (I <= N) and (AText[I] = '%') then
+        begin
+          Inc(I);
+          if (I <= N) and CharInSet(AText[I], ['a'..'z', 'A'..'Z', '0'..'9']) then
+            Inc(I);
+        end
+        else if (I <= N) and CharInSet(AText[I], ['0'..'9']) then
+        begin
+          Inc(I);
+        end
+        else
+        begin
+          while (I <= N) and (AText[I] <> '%') and not CharInSet(AText[I], [#13, #10, ' ', '=']) do
+            Inc(I);
+          if (I <= N) and (AText[I] = '%') then
+            Inc(I);
+        end;
+        AddToken(stType, I - StartPos);
+        Continue;
+      end;
+
+      if AText[I] = '!' then
+      begin
+        Inc(I);
+        while (I <= N) and (AText[I] <> '!') and not CharInSet(AText[I], [#13, #10, ' ', '=']) do
+          Inc(I);
+        if (I <= N) and (AText[I] = '!') then
+          Inc(I);
+        AddToken(stType, I - StartPos);
+        Continue;
+      end;
+
+      // 5. Identifiers, commands, and keywords
+      if CharInSet(AText[I], ['a'..'z', 'A'..'Z', '_', '@']) then
+      begin
+        Inc(I);
+        while (I <= N) and CharInSet(AText[I], ['a'..'z', 'A'..'Z', '0'..'9', '_']) do
+          Inc(I);
+
+        if SameText(Copy(AText, StartPos, I - StartPos), 'rem') or
+           SameText(Copy(AText, StartPos, I - StartPos), '@rem') then
+        begin
+          while (I <= N) and not CharInSet(AText[I], [#13, #10]) do
+            Inc(I);
+          AddToken(stComment, I - StartPos);
+        end
+        else if IsKeyword(Copy(AText, StartPos, I - StartPos)) or
+                ((AText[StartPos] = '@') and (I - StartPos > 1) and IsKeyword(Copy(AText, StartPos + 1, I - StartPos - 1))) then
+        begin
+          AddToken(stKeyword, I - StartPos);
+        end
+        else
+        begin
+          AddToken(stPlain, I - StartPos);
+        end;
+        Continue;
+      end;
+
+      // 6. Numbers
+      if CharInSet(AText[I], ['0'..'9']) then
+      begin
+        while (I <= N) and CharInSet(AText[I], ['0'..'9']) do
+          Inc(I);
+        AddToken(stNumber, I - StartPos);
+        Continue;
+      end;
+
+      // 7. Symbols
+      if CharInSet(AText[I], ['=', ':', '<', '>', '|', '&', '(', ')', ',', '*', '?', '/']) then
+      begin
+        Inc(I);
+        AddToken(stSymbol, I - StartPos);
+        Continue;
+      end;
+
+      // Fallback
+      Inc(I);
+      AddToken(stPlain, I - StartPos);
+    end;
+    Result := Tokens.ToArray;
+  finally
+    Tokens.Free;
+  end;
+end;
+
+{ TVBSyntaxHighlighter }
+
+constructor TVBSyntaxHighlighter.Create;
+var
+  K: string;
+begin
+  inherited Create;
+  FKeywords := THashSet<string>.Create;
+  for K in VBKeywords do
+    FKeywords.Add(K);
+  FTypes := THashSet<string>.Create;
+  for K in VBTypes do
+    FTypes.Add(K);
+end;
+
+destructor TVBSyntaxHighlighter.Destroy;
+begin
+  FKeywords.Free;
+  FTypes.Free;
+  inherited Destroy;
+end;
+
+function TVBSyntaxHighlighter.GetLanguageName: string;
+begin
+  Result := 'Visual Basic';
+end;
+
+function TVBSyntaxHighlighter.Highlight(const AText: string): TArray<TSourceToken>;
+var
+  Tokens: TList<TSourceToken>;
+  I, N: Integer;
+  StartPos: Integer;
+
+  procedure AddToken(AKind: TSourceTokenKind; ALength: Integer);
+  var
+    Token: TSourceToken;
+  begin
+    if ALength <= 0 then Exit;
+    Token.Text := Copy(AText, StartPos, ALength);
+    Token.Kind := AKind;
+    Token.Offset := StartPos - 1;
+    Tokens.Add(Token);
+    I := StartPos + ALength;
+  end;
+
+  function IsKeyword(const S: string): Boolean;
+  begin
+    Result := FKeywords.Contains(LowerCase(S));
+  end;
+
+  function IsType(const S: string): Boolean;
+  begin
+    Result := FTypes.Contains(LowerCase(S));
+  end;
+
+begin
+  Tokens := TList<TSourceToken>.Create;
+  try
+    I := 1;
+    N := Length(AText);
+    while I <= N do
+    begin
+      StartPos := I;
+
+      // 1. Whitespace
+      if CharInSet(AText[I], [' ', #9, #13, #10]) then
+      begin
+        while (I <= N) and CharInSet(AText[I], [' ', #9, #13, #10]) do
+          Inc(I);
+        AddToken(stPlain, I - StartPos);
+        Continue;
+      end;
+
+      // 2. Single Quote Comment (')
+      if AText[I] = '''' then
+      begin
+        Inc(I);
+        while (I <= N) and not CharInSet(AText[I], [#13, #10]) do
+          Inc(I);
+        AddToken(stComment, I - StartPos);
+        Continue;
+      end;
+
+      // 3. Double Quoted Strings with double-double quote escape
+      if AText[I] = '"' then
+      begin
+        Inc(I);
+        while I <= N do
+        begin
+          if AText[I] = '"' then
+          begin
+            Inc(I);
+            if (I <= N) and (AText[I] = '"') then
+              Inc(I)
+            else
+              Break;
+          end
+          else if CharInSet(AText[I], [#13, #10]) then
+            Break
+          else
+            Inc(I);
+        end;
+        AddToken(stString, I - StartPos);
+        Continue;
+      end;
+
+      // 4. Identifiers, Keywords, Types, and REM Comments
+      if CharInSet(AText[I], ['a'..'z', 'A'..'Z', '_']) or (Ord(AText[I]) > 127) then
+      begin
+        Inc(I);
+        while (I <= N) and (CharInSet(AText[I], ['a'..'z', 'A'..'Z', '0'..'9', '_']) or (Ord(AText[I]) > 127)) do
+          Inc(I);
+
+        if SameText(Copy(AText, StartPos, I - StartPos), 'rem') then
+        begin
+          while (I <= N) and not CharInSet(AText[I], [#13, #10]) do
+            Inc(I);
+          AddToken(stComment, I - StartPos);
+        end
+        else if IsKeyword(Copy(AText, StartPos, I - StartPos)) then
+        begin
+          AddToken(stKeyword, I - StartPos);
+        end
+        else if IsType(Copy(AText, StartPos, I - StartPos)) then
+        begin
+          AddToken(stType, I - StartPos);
+        end
+        else
+        begin
+          AddToken(stPlain, I - StartPos);
+        end;
+        Continue;
+      end;
+
+      // 5. Numbers
+      if CharInSet(AText[I], ['0'..'9']) then
+      begin
+        while (I <= N) and CharInSet(AText[I], ['0'..'9']) do
+          Inc(I);
+        AddToken(stNumber, I - StartPos);
+        Continue;
+      end;
+
+      // 6. Symbols
+      if CharInSet(AText[I], ['=', '+', '-', '*', '/', '\', '^', '&', '<', '>',
+        '(', ')', ',', '.', ':', '?', '_']) then
       begin
         Inc(I);
         AddToken(stSymbol, I - StartPos);
