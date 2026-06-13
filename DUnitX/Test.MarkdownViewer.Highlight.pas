@@ -127,13 +127,64 @@ type
     // Registry coverage
     [Test]
     procedure TestRegistryAllLanguages;
+
+    // Delphi form files (.dfm) and source-file aliases
+    [Test]
+    procedure TestDfmKeywords;
+    [Test]
+    procedure TestDfmPropertyValues;
+    [Test]
+    procedure TestDfmCharConstants;
+    [Test]
+    procedure TestDelphiSourceFileAliases;
+
+    // Whole-stream invariants (the regression guard against the zero-length /
+    // infinite-loop class of lexer bug).
+    [Test]
+    procedure TestTokenStreamInvariantsAllLanguages;
+    [Test]
+    procedure TestTokenStreamInvariantsAdversarialInput;
   end;
 
 implementation
 
 uses
   System.SysUtils,
+  System.Generics.Collections,
   MarkdownViewer.Highlight;
+
+// Assert that a highlighter's output tiles the input exactly: tokens are
+// contiguous from offset 0, none are zero-length, and concatenating their
+// text reproduces the input verbatim. Any violation indicates a lexer that
+// dropped, overlapped, or (worst case) failed to advance over input.
+procedure AssertTokenStreamValid(const HL: IMarkdownSyntaxHighlighter;
+  const AInput: string);
+var
+  Tokens: TArray<TSourceToken>;
+  I, Expected: Integer;
+  Rebuilt: string;
+begin
+  Tokens := HL.Highlight(AInput);
+  Expected := 0;
+  Rebuilt := '';
+  for I := 0 to High(Tokens) do
+  begin
+    Assert.IsTrue(Length(Tokens[I].Text) > 0,
+      Format('%s: zero-length token at index %d for input %s',
+        [HL.GetLanguageName, I, QuotedStr(AInput)]));
+    Assert.AreEqual(Expected, Tokens[I].Offset,
+      Format('%s: non-contiguous offset at index %d for input %s',
+        [HL.GetLanguageName, I, QuotedStr(AInput)]));
+    Inc(Expected, Length(Tokens[I].Text));
+    Rebuilt := Rebuilt + Tokens[I].Text;
+  end;
+  Assert.AreEqual(Length(AInput), Expected,
+    Format('%s: tokens do not span the whole input %s',
+      [HL.GetLanguageName, QuotedStr(AInput)]));
+  Assert.AreEqual(AInput, Rebuilt,
+    Format('%s: concatenated tokens differ from input %s',
+      [HL.GetLanguageName, QuotedStr(AInput)]));
+end;
 
 { TMarkdownHighlightTests }
 
@@ -1061,6 +1112,180 @@ begin
 
   // Unknown
   Assert.IsTrue(TMarkdownSyntaxHighlighterRegistry.GetHighlighter('xyz') = nil);
+end;
+
+// ---------------------------------------------------------------------------
+// Delphi form files (.dfm) and source-file aliases
+// ---------------------------------------------------------------------------
+
+procedure TMarkdownHighlightTests.TestDfmKeywords;
+var
+  HL: IMarkdownSyntaxHighlighter;
+  Tokens: TArray<TSourceToken>;
+begin
+  HL := TMarkdownSyntaxHighlighterRegistry.GetHighlighter('dfm');
+  Assert.IsTrue(HL <> nil);
+  Assert.AreEqual('DFM', HL.GetLanguageName);
+
+  // object Button1: TButton ... end
+  Tokens := HL.Highlight('object Button1: TButton'#13#10'end');
+  // object(0=stKeyword) ' '(1) Button1(2=stPlain) :(3=stSymbol) ' '(4)
+  // TButton(5=stPlain) CRLF(6=stPlain) end(7=stKeyword)
+  Assert.AreEqual(stKeyword, Tokens[0].Kind);
+  Assert.AreEqual('object', Tokens[0].Text);
+  Assert.AreEqual(stPlain, Tokens[2].Kind);
+  Assert.AreEqual('Button1', Tokens[2].Text);
+  Assert.AreEqual(stSymbol, Tokens[3].Kind);
+  Assert.AreEqual(':', Tokens[3].Text);
+  Assert.AreEqual(stKeyword, Tokens[High(Tokens)].Kind);
+  Assert.AreEqual('end', Tokens[High(Tokens)].Text);
+end;
+
+procedure TMarkdownHighlightTests.TestDfmPropertyValues;
+var
+  HL: IMarkdownSyntaxHighlighter;
+  Tokens: TArray<TSourceToken>;
+begin
+  HL := TMarkdownSyntaxHighlighterRegistry.GetHighlighter('dfm');
+  Assert.IsTrue(HL <> nil);
+
+  // Qualified property name, string value, hex colour, boolean
+  Tokens := HL.Highlight('Caption = ''OK''');
+  Assert.AreEqual('Caption', Tokens[0].Text);
+  Assert.AreEqual(stPlain, Tokens[0].Kind);
+  Assert.AreEqual(stSymbol, Tokens[2].Kind);
+  Assert.AreEqual('=', Tokens[2].Text);
+  Assert.AreEqual(stString, Tokens[4].Kind);
+  Assert.AreEqual('''OK''', Tokens[4].Text);
+
+  // Qualified name stays one token
+  Tokens := HL.Highlight('Font.Charset = DEFAULT_CHARSET');
+  Assert.AreEqual('Font.Charset', Tokens[0].Text);
+
+  // Hex colour value
+  Tokens := HL.Highlight('Color = $00FF8040');
+  Assert.AreEqual(stNumber, Tokens[High(Tokens)].Kind);
+  Assert.AreEqual('$00FF8040', Tokens[High(Tokens)].Text);
+
+  // Boolean literal classified as type
+  Tokens := HL.Highlight('Enabled = True');
+  Assert.AreEqual(stType, Tokens[High(Tokens)].Kind);
+  Assert.AreEqual('True', Tokens[High(Tokens)].Text);
+end;
+
+procedure TMarkdownHighlightTests.TestDfmCharConstants;
+var
+  HL: IMarkdownSyntaxHighlighter;
+  Tokens: TArray<TSourceToken>;
+begin
+  HL := TMarkdownSyntaxHighlighterRegistry.GetHighlighter('dfm');
+  Assert.IsTrue(HL <> nil);
+
+  // #13#10 decimal char constants -> two adjacent string tokens
+  Tokens := HL.Highlight('#13#10');
+  Assert.AreEqual(2, Length(Tokens));
+  Assert.AreEqual(stString, Tokens[0].Kind);
+  Assert.AreEqual('#13', Tokens[0].Text);
+  Assert.AreEqual('#10', Tokens[1].Text);
+
+  // #$0D hex char constant
+  Tokens := HL.Highlight('#$0D');
+  Assert.AreEqual(1, Length(Tokens));
+  Assert.AreEqual(stString, Tokens[0].Kind);
+  Assert.AreEqual('#$0D', Tokens[0].Text);
+end;
+
+procedure TMarkdownHighlightTests.TestDelphiSourceFileAliases;
+var
+  Delphi: IMarkdownSyntaxHighlighter;
+begin
+  Delphi := TMarkdownSyntaxHighlighterRegistry.GetHighlighter('delphi');
+  Assert.IsTrue(Delphi <> nil);
+  // .dpr / .dpk and the other Pascal source extensions map to the Delphi lexer
+  Assert.AreSame(Delphi, TMarkdownSyntaxHighlighterRegistry.GetHighlighter('dpr'));
+  Assert.AreSame(Delphi, TMarkdownSyntaxHighlighterRegistry.GetHighlighter('dpk'));
+  Assert.AreSame(Delphi, TMarkdownSyntaxHighlighterRegistry.GetHighlighter('objectpascal'));
+  // c# is an alias of the C# highlighter
+  Assert.IsTrue(TMarkdownSyntaxHighlighterRegistry.GetHighlighter('c#') <> nil);
+  Assert.AreSame(TMarkdownSyntaxHighlighterRegistry.GetHighlighter('csharp'),
+    TMarkdownSyntaxHighlighterRegistry.GetHighlighter('c#'));
+end;
+
+// ---------------------------------------------------------------------------
+// Whole-stream invariants
+// ---------------------------------------------------------------------------
+
+procedure TMarkdownHighlightTests.TestTokenStreamInvariantsAllLanguages;
+const
+  Langs: array[0..23] of string = (
+    'delphi', 'dfm', 'sql', 'c', 'cpp', 'csharp', 'java', 'js', 'ts', 'go',
+    'rust', 'php', 'python', 'ruby', 'html', 'xml', 'css', 'json', 'yaml',
+    'sh', 'ini', 'pas', 'dpr', 'rb');
+  // A varied sample exercising strings, comments, numbers, symbols and
+  // keywords. Run through every highlighter regardless of language so each
+  // lexer must tile arbitrary input without gaps or zero-length tokens.
+  Samples: array[0..7] of string = (
+    'function Foo(const x: Integer): string; // note',
+    'SELECT * FROM t WHERE a = ''b'' AND n = 42;',
+    'int main(void) { return 0xFF; /* done */ }',
+    'def f(): return "x" # comment',
+    '<div class="a">Hi &amp; bye</div>',
+    '{ "k": [1, 2.5, true, null], "s": "v" }',
+    'key: value # c'#13#10'- item',
+    'object F: TForm'#13#10'  Caption = ''Hi'''#13#10'end');
+var
+  L, S: Integer;
+  HL: IMarkdownSyntaxHighlighter;
+begin
+  for L := 0 to High(Langs) do
+  begin
+    HL := TMarkdownSyntaxHighlighterRegistry.GetHighlighter(Langs[L]);
+    Assert.IsTrue(HL <> nil, 'missing highlighter: ' + Langs[L]);
+    for S := 0 to High(Samples) do
+      AssertTokenStreamValid(HL, Samples[S]);
+  end;
+end;
+
+procedure TMarkdownHighlightTests.TestTokenStreamInvariantsAdversarialInput;
+const
+  Langs: array[0..23] of string = (
+    'delphi', 'dfm', 'sql', 'c', 'cpp', 'csharp', 'java', 'js', 'ts', 'go',
+    'rust', 'php', 'python', 'ruby', 'html', 'xml', 'css', 'json', 'yaml',
+    'sh', 'ini', 'pas', 'dpr', 'rb');
+  // Inputs that historically broke naive lexers: lone delimiters, unterminated
+  // strings and comments, bare symbols, and characters outside the keyword
+  // sets. None may produce a gap, overlap or non-advancing token.
+  Inputs: array[0..18] of string = (
+    '',
+    ' ',
+    #9#9,
+    '"',
+    '''',
+    '/*',
+    '//',
+    '#',
+    '$',
+    '@',
+    '`',
+    '<',
+    '&',
+    '[',
+    ':',
+    '"unterminated string',
+    '/* unterminated comment',
+    '0x', // hex prefix with no digits
+    '....::==<<>>{}[]()');
+var
+  L, S: Integer;
+  HL: IMarkdownSyntaxHighlighter;
+begin
+  for L := 0 to High(Langs) do
+  begin
+    HL := TMarkdownSyntaxHighlighterRegistry.GetHighlighter(Langs[L]);
+    Assert.IsTrue(HL <> nil, 'missing highlighter: ' + Langs[L]);
+    for S := 0 to High(Inputs) do
+      AssertTokenStreamValid(HL, Inputs[S]);
+  end;
 end;
 
 initialization

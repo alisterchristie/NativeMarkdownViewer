@@ -140,6 +140,20 @@ type
     function Highlight(const AText: string): TArray<TSourceToken>;
   end;
 
+  // Delphi form files (.dfm). The textual DFM grammar: object/end nesting,
+  // Pascal single-quoted strings, #nn / #$hh character constants, $ hex and
+  // decimal numbers, qualified property names (Font.Charset) and the
+  // [ ] < > ( ) grouping used for sets, collections and lists.
+  TDfmSyntaxHighlighter = class(TInterfacedObject, IMarkdownSyntaxHighlighter)
+  private
+    FKeywords: THashSet<string>;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    function GetLanguageName: string;
+    function Highlight(const AText: string): TArray<TSourceToken>;
+  end;
+
 implementation
 
 { TMarkdownSyntaxHighlighterRegistry }
@@ -156,8 +170,17 @@ begin
   // Register default highlighters
   DelphiHL := TDelphiSyntaxHighlighter.Create;
   RegisterHighlighter('pascal', DelphiHL);
+  RegisterHighlighter('objectpascal', DelphiHL);
+  RegisterHighlighter('objpas', DelphiHL);
   RegisterHighlighter('delphi', DelphiHL);
   RegisterHighlighter('pas', DelphiHL);
+  RegisterHighlighter('dpr', DelphiHL);
+  RegisterHighlighter('dpk', DelphiHL);
+  RegisterHighlighter('pp', DelphiHL);
+  RegisterHighlighter('lpr', DelphiHL);
+
+  // Delphi form files
+  RegisterHighlighter('dfm', TDfmSyntaxHighlighter.Create);
 
   SqlHL := TSQLSyntaxHighlighter.Create;
   RegisterHighlighter('sql', SqlHL);
@@ -233,6 +256,7 @@ begin
     True);
   RegisterHighlighter('cs', GenHL);
   RegisterHighlighter('csharp', GenHL);
+  RegisterHighlighter('c#', GenHL);
 
   // Java
   GenHL := TGenericSyntaxHighlighter.Create('Java',
@@ -2919,6 +2943,186 @@ begin
           Inc(I);
         if I <= N then Inc(I);
         AddToken(stString, I - StartPos);
+        Continue;
+      end;
+
+      // Fallback
+      Inc(I);
+      AddToken(stPlain, I - StartPos);
+    end;
+    Result := Tokens.ToArray;
+  finally
+    Tokens.Free;
+  end;
+end;
+
+{ TDfmSyntaxHighlighter }
+
+constructor TDfmSyntaxHighlighter.Create;
+const
+  Keywords: array[0..4] of string = (
+    'object', 'inherited', 'inline', 'item', 'end'
+  );
+var
+  K: string;
+begin
+  inherited Create;
+  FKeywords := THashSet<string>.Create;
+  for K in Keywords do
+    FKeywords.Add(K);
+end;
+
+destructor TDfmSyntaxHighlighter.Destroy;
+begin
+  FKeywords.Free;
+  inherited Destroy;
+end;
+
+function TDfmSyntaxHighlighter.GetLanguageName: string;
+begin
+  Result := 'DFM';
+end;
+
+function TDfmSyntaxHighlighter.Highlight(const AText: string): TArray<TSourceToken>;
+var
+  Tokens: TList<TSourceToken>;
+  I, N: Integer;
+  StartPos: Integer;
+
+  procedure AddToken(AKind: TSourceTokenKind; ALength: Integer);
+  var
+    Token: TSourceToken;
+  begin
+    if ALength <= 0 then Exit;
+    Token.Text := Copy(AText, StartPos, ALength);
+    Token.Kind := AKind;
+    Token.Offset := StartPos - 1;
+    Tokens.Add(Token);
+    I := StartPos + ALength;
+  end;
+
+  function IsKeyword(const S: string): Boolean;
+  begin
+    Result := FKeywords.Contains(LowerCase(S));
+  end;
+
+  // '.' is allowed inside an identifier (qualified property names such as
+  // Font.Charset) but not as the first character.
+  function IsIdentChar(C: Char): Boolean;
+  begin
+    Result := CharInSet(C, ['a'..'z', 'A'..'Z', '_', '0'..'9', '.']) or (Ord(C) > 127);
+  end;
+
+  function IsIdentStart(C: Char): Boolean;
+  begin
+    Result := CharInSet(C, ['a'..'z', 'A'..'Z', '_']) or (Ord(C) > 127);
+  end;
+
+begin
+  Tokens := TList<TSourceToken>.Create;
+  try
+    I := 1;
+    N := Length(AText);
+    while I <= N do
+    begin
+      StartPos := I;
+
+      // 1. Whitespace
+      if CharInSet(AText[I], [' ', #9, #13, #10]) then
+      begin
+        while (I <= N) and CharInSet(AText[I], [' ', #9, #13, #10]) do
+          Inc(I);
+        AddToken(stPlain, I - StartPos);
+        Continue;
+      end;
+
+      // 2. Single-quoted string (Pascal '' escaping)
+      if AText[I] = '''' then
+      begin
+        Inc(I);
+        while I <= N do
+        begin
+          if AText[I] = '''' then
+          begin
+            Inc(I);
+            if (I <= N) and (AText[I] = '''') then
+              Inc(I)
+            else
+              Break;
+          end
+          else if CharInSet(AText[I], [#13, #10]) then
+            Break
+          else
+            Inc(I);
+        end;
+        AddToken(stString, I - StartPos);
+        Continue;
+      end;
+
+      // 3. Character constant: #13, #$0D
+      if AText[I] = '#' then
+      begin
+        Inc(I);
+        if (I <= N) and (AText[I] = '$') then
+        begin
+          Inc(I);
+          while (I <= N) and CharInSet(AText[I], ['0'..'9', 'a'..'f', 'A'..'F']) do
+            Inc(I);
+        end
+        else
+          while (I <= N) and CharInSet(AText[I], ['0'..'9']) do
+            Inc(I);
+        AddToken(stString, I - StartPos);
+        Continue;
+      end;
+
+      // 4. Hex literal $00FF8040
+      if AText[I] = '$' then
+      begin
+        Inc(I);
+        while (I <= N) and CharInSet(AText[I], ['0'..'9', 'a'..'f', 'A'..'F']) do
+          Inc(I);
+        AddToken(stNumber, I - StartPos);
+        Continue;
+      end;
+
+      // 5. Decimal / float
+      if CharInSet(AText[I], ['0'..'9']) then
+      begin
+        while (I <= N) and CharInSet(AText[I], ['0'..'9']) do
+          Inc(I);
+        if (I + 1 <= N) and (AText[I] = '.') and CharInSet(AText[I+1], ['0'..'9']) then
+        begin
+          I := I + 2;
+          while (I <= N) and CharInSet(AText[I], ['0'..'9']) do
+            Inc(I);
+        end;
+        AddToken(stNumber, I - StartPos);
+        Continue;
+      end;
+
+      // 6. Identifiers / keywords / boolean literals
+      if IsIdentStart(AText[I]) then
+      begin
+        while (I <= N) and IsIdentChar(AText[I]) do
+          Inc(I);
+
+        if IsKeyword(Copy(AText, StartPos, I - StartPos)) then
+          AddToken(stKeyword, I - StartPos)
+        else if SameText(Copy(AText, StartPos, I - StartPos), 'True') or
+                SameText(Copy(AText, StartPos, I - StartPos), 'False') then
+          AddToken(stType, I - StartPos)
+        else
+          AddToken(stPlain, I - StartPos);
+        Continue;
+      end;
+
+      // 7. Grouping and assignment symbols
+      if CharInSet(AText[I], ['=', ':', ',', '.', '<', '>', '(', ')',
+        '[', ']', '{', '}', '+', '-']) then
+      begin
+        Inc(I);
+        AddToken(stSymbol, I - StartPos);
         Continue;
       end;
 
