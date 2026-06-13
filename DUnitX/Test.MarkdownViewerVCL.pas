@@ -160,6 +160,10 @@ type
     [Test]
     procedure Ctrl0StripsHeading;
     [Test]
+    procedure AltUpDownMovesLine;
+    [Test]
+    procedure AltUpDownPreservesCaretOffset;
+    [Test]
     procedure TabOnHeadingPreservesCaretColumn;
     [Test]
     procedure ReadOnlyArrowKeysScroll;
@@ -1355,6 +1359,43 @@ begin
   FViewer.PressKey(VK_HOME);
   FViewer.PressKey(Ord('0'), [ssCtrl]);
   Assert.AreEqual('Hello', TrimRight(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.AltUpDownMovesLine;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'Line 1' + sLineBreak + 'Line 2';
+  FViewer.ReadOnly := False;
+  RepaintViewer;
+
+  // Caret on Line 1. Alt+Down moves it to the bottom.
+  FViewer.PressKey(VK_HOME);
+  FViewer.PressKey(VK_DOWN, [ssAlt]);
+  Assert.AreEqual('Line 2' + sLineBreak + 'Line 1', TrimRight(FViewer.MarkdownText));
+
+  // Alt+Up moves it back to the top.
+  FViewer.PressKey(VK_UP, [ssAlt]);
+  Assert.AreEqual('Line 1' + sLineBreak + 'Line 2', TrimRight(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.AltUpDownPreservesCaretOffset;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'Line 1' + sLineBreak + 'Line 2';
+  FViewer.ReadOnly := False;
+  RepaintViewer;
+
+  // Move caret after 'n' in 'Line 1' (offset 3)
+  FViewer.PressKey(VK_RIGHT);
+  FViewer.PressKey(VK_RIGHT);
+  FViewer.PressKey(VK_RIGHT);
+  
+  FViewer.PressKey(VK_DOWN, [ssAlt]);
+  Assert.AreEqual('Line 2' + sLineBreak + 'Line 1', TrimRight(FViewer.MarkdownText));
+  
+  // Type X. Since the caret offset should be preserved, it should result in 'LinXe 1'
+  FViewer.TypeCharacter('X');
+  Assert.AreEqual('Line 2' + sLineBreak + 'LinXe 1', TrimRight(FViewer.MarkdownText));
 end;
 
 procedure TMarkDownViewerTests.ReadOnlyArrowKeysScroll;

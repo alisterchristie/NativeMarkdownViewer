@@ -301,6 +301,7 @@ type
     procedure ChangeHeadingLevel(Delta: Integer);
     procedure SetHeadingLevel(TargetLevel: Integer);
     procedure ChangeListIndent(Delta: Integer);
+    procedure MoveLineUpDown(Delta: Integer);
     procedure ToggleBold;
     procedure ToggleItalic;
     procedure ToggleStrikethrough;
@@ -1155,9 +1156,15 @@ begin
     VK_RIGHT:
       MoveCaret(1, ssShift in Shift);
     VK_UP:
-      MoveCaretVertical(-1, ssShift in Shift);
+      if ssAlt in Shift then
+        MoveLineUpDown(-1)
+      else
+        MoveCaretVertical(-1, ssShift in Shift);
     VK_DOWN:
-      MoveCaretVertical(1, ssShift in Shift);
+      if ssAlt in Shift then
+        MoveLineUpDown(1)
+      else
+        MoveCaretVertical(1, ssShift in Shift);
     VK_HOME:
       MoveCaretLineBoundary(False, ssShift in Shift);
     VK_END:
@@ -4205,6 +4212,48 @@ begin
   ApplyMarkdownLine(LineIdx, NewLine);
 
   NewSourcePos := Max(LineStartSourcePos(LineIdx), OldSourcePos + (Length(NewLine) - Length(OldLine)));
+  FinishEditAtSource(NewSourcePos);
+end;
+
+procedure TMarkDownViewer.MoveLineUpDown(Delta: Integer);
+var
+  OldSourcePos: Integer;
+  LineIdx: Integer;
+  TargetLineIdx: Integer;
+  LineText: string;
+  CaretOffset: Integer;
+  NewLineStartPos: Integer;
+  NewSourcePos: Integer;
+begin
+  if FReadOnly then Exit;
+  if FSelectableText = '' then Exit;
+  if Delta = 0 then Exit;
+
+  OldSourcePos := SelectableToSourcePosition(FSelectionCaret);
+  LineIdx := SourcePosToLine(OldSourcePos);
+  TargetLineIdx := LineIdx + Delta;
+
+  if (LineIdx < 0) or (LineIdx >= FMarkdown.Count) then Exit;
+  if (TargetLineIdx < 0) or (TargetLineIdx >= FMarkdown.Count) then Exit;
+
+  LineText := FMarkdown[LineIdx];
+  CaretOffset := OldSourcePos - LineStartSourcePos(LineIdx);
+
+  PushUndoState;
+
+  FApplyingEdit := True;
+  FMarkdown.BeginUpdate;
+  try
+    FMarkdown.Exchange(LineIdx, TargetLineIdx);
+  finally
+    FMarkdown.EndUpdate;
+    FApplyingEdit := False;
+  end;
+
+  MarkdownChanged(Self);
+
+  NewLineStartPos := LineStartSourcePos(TargetLineIdx);
+  NewSourcePos := Min(NewLineStartPos + CaretOffset, NewLineStartPos + Length(LineText));
   FinishEditAtSource(NewSourcePos);
 end;
 
