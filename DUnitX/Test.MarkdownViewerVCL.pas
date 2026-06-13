@@ -154,6 +154,8 @@ type
     [Test]
     procedure CtrlKWrapsSelectionInLink;
     [Test]
+    procedure CtrlSpaceTogglesCheckbox;
+    [Test]
     procedure TabOnHeadingPreservesCaretColumn;
     [Test]
     procedure ReadOnlyArrowKeysScroll;
@@ -1298,6 +1300,24 @@ begin
   FViewer.PressKey(Ord('K'), [ssCtrl]);
 
   Assert.AreEqual('[Hello]()', TrimRight(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.CtrlSpaceTogglesCheckbox;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := '- [ ] task';
+  FViewer.ReadOnly := False;
+  FViewer.AllowTaskToggle := True;
+  RepaintViewer;
+
+  FViewer.PressKey(VK_HOME);
+  FViewer.PressKey(VK_SPACE, [ssCtrl]);
+
+  Assert.AreEqual('- [x] task', TrimRight(FViewer.MarkdownText));
+
+  // Toggle it back
+  FViewer.PressKey(VK_SPACE, [ssCtrl]);
+  Assert.AreEqual('- [ ] task', TrimRight(FViewer.MarkdownText));
 end;
 
 procedure TMarkDownViewerTests.ReadOnlyArrowKeysScroll;

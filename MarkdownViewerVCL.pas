@@ -1019,6 +1019,9 @@ end;
 // Ctrl-modified keys: clipboard, undo/redo, select-all and document-boundary
 // navigation. Returns True when the key was consumed.
 function TMarkDownViewer.HandleCtrlKey(Key: Word; Shift: TShiftState): Boolean;
+var
+  OldSourcePos: Integer;
+  LineIdx: Integer;
 begin
   Result := True;
   case Key of
@@ -1076,6 +1079,16 @@ begin
         Result := False;
     VK_INSERT:
       CopySelectionToClipboard(True);
+    VK_SPACE:
+      if FAllowTaskToggle then
+      begin
+        OldSourcePos := SelectableToSourcePosition(FSelectionCaret);
+        LineIdx := SourcePosToLine(OldSourcePos);
+        ToggleTaskAtLine(LineIdx);
+        FinishEditAtSource(OldSourcePos);
+      end
+      else
+        Result := False;
     VK_LEFT:
       if not FReadOnly then
         MoveCaretWord(-1, ssShift in Shift)
