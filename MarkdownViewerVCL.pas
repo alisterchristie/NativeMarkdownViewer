@@ -96,6 +96,13 @@ type
       SizeDelta: Integer = 0; AAlignment: TAlignment = taLeftJustify;
       const AMarkdownLinePrefix: string = '';
       AEmitAnchor: Boolean = False): Integer;
+    function InlineTokensForBlock(ABlock: TMarkDownBlock): TMarkDownInlineList;
+    function ResolveImagePath(const Url: string): string;
+    function DrawImageBlock(const AltText, Url: string;
+      ALeft, ATop, AWidth: Integer): Integer;
+    function TableAlignmentFromCell(const Cell: string): TAlignment;
+    function DrawTable(const TableText: string; ALeft, ATop, AWidth: Integer;
+      const ABlockSourceMap: TArray<Integer>): Integer;
     procedure ClearSelection;
     procedure ClearInlineTokenCaches;
     procedure CopySelectionToClipboard(PlainText: Boolean);
@@ -2383,34 +2390,7 @@ function TMarkDownViewer.DrawInline(ATokens: TMarkDownInlineList;
     Result := YPos + LineHeight - ATop;
   end;
 
-procedure TMarkDownViewer.Paint;
-var
-  Blocks: TMarkDownBlockList;
-  I: Integer;
-  Y: Integer;
-  TextLeft: Integer;
-  ContentWidth: Integer;
-  LineHeight: Integer;
-  TotalHeight: Integer;
-  TokenHeight: Integer;
-  Tokens: TMarkDownInlineList;
-  Block: TMarkDownBlock;
-  Lines: TStringList;
-  LineIndex: Integer;
-  CodePos: Integer;
-  R: TRect;
-  CheckRect: TRect;
-  TaskHit: TMarkDownTaskHit;
-  CanvasState: TCanvasState;
-  Bullet: string;
-  ListMarker: string;
-  ListLeft: Integer;
-  MarkerLeft: Integer;
-  TextIndent: Integer;
-  LineTextStart: Integer;
-  OldBkMode: Integer;
-
-  function InlineTokensForBlock(ABlock: TMarkDownBlock): TMarkDownInlineList;
+function TMarkDownViewer.InlineTokensForBlock(ABlock: TMarkDownBlock): TMarkDownInlineList;
   begin
     if ABlock.InlineTokens = nil then
       ABlock.InlineTokens := TMarkDownBlockParser.ParseInline(ABlock.Text,
@@ -2418,7 +2398,7 @@ var
     Result := ABlock.InlineTokens;
   end;
 
-  function ResolveImagePath(const Url: string): string;
+function TMarkDownViewer.ResolveImagePath(const Url: string): string;
   begin
     Result := Trim(Url);
     if (Result = '') or ContainsText(Result, '://') then
@@ -2435,7 +2415,7 @@ var
       Result := ExpandFileName(Result);
   end;
 
-  function DrawImageBlock(const AltText, Url: string; ALeft, ATop, AWidth: Integer): Integer;
+function TMarkDownViewer.DrawImageBlock(const AltText, Url: string; ALeft, ATop, AWidth: Integer): Integer;
   var
     Picture: TPicture;
     ImagePath: string;
@@ -2473,7 +2453,7 @@ var
     Result := DrawHeight;
   end;
 
-  function TableAlignmentFromCell(const Cell: string): TAlignment;
+function TMarkDownViewer.TableAlignmentFromCell(const Cell: string): TAlignment;
   var
     T: string;
     StartsWithColon: Boolean;
@@ -2490,7 +2470,8 @@ var
       Result := taLeftJustify;
   end;
 
-  function DrawTable(const TableText: string; ALeft, ATop, AWidth: Integer): Integer;
+function TMarkDownViewer.DrawTable(const TableText: string; ALeft, ATop, AWidth: Integer;
+    const ABlockSourceMap: TArray<Integer>): Integer;
   var
     SourceLines: TStringList;
     Rows: TObjectList<TStringList>;
@@ -2638,7 +2619,7 @@ var
           begin
             CellTokens := TMarkDownBlockParser.ParseInline(CellText,
               FLinkReferences,
-              SliceMap(Block.SourceMap, RowBlockPos[SourceIndex] + CellCol - 1,
+              SliceMap(ABlockSourceMap, RowBlockPos[SourceIndex] + CellCol - 1,
                 Length(CellText)));
             CellSearchCol := CellCol + Length(CellText);
           end
@@ -2659,7 +2640,7 @@ var
             AddSelectableText(#9, '', False);
           Inc(X, ColWidths[Col]);
         end;
-        AddSelectableBreak(True, SliceMapValue(Block.SourceMap,
+        AddSelectableBreak(True, SliceMapValue(ABlockSourceMap,
           RowBlockPos[SourceIndex] + Length(SourceLines[SourceIndex])));
         Inc(RowTop, RowHeight);
       end;
@@ -2671,6 +2652,33 @@ var
       SourceLines.Free;
     end;
   end;
+
+procedure TMarkDownViewer.Paint;
+var
+  Blocks: TMarkDownBlockList;
+  I: Integer;
+  Y: Integer;
+  TextLeft: Integer;
+  ContentWidth: Integer;
+  LineHeight: Integer;
+  TotalHeight: Integer;
+  TokenHeight: Integer;
+  Tokens: TMarkDownInlineList;
+  Block: TMarkDownBlock;
+  Lines: TStringList;
+  LineIndex: Integer;
+  CodePos: Integer;
+  R: TRect;
+  CheckRect: TRect;
+  TaskHit: TMarkDownTaskHit;
+  CanvasState: TCanvasState;
+  Bullet: string;
+  ListMarker: string;
+  ListLeft: Integer;
+  MarkerLeft: Integer;
+  TextIndent: Integer;
+  LineTextStart: Integer;
+  OldBkMode: Integer;
 
 begin
   Canvas.Brush.Color := GetEffectiveBackground;
@@ -2787,7 +2795,8 @@ begin
         begin
           CanvasState := TCanvasState.Save(Canvas);
           try
-            TokenHeight := DrawTable(Block.Text, TextLeft, Y, ContentWidth);
+            TokenHeight := DrawTable(Block.Text, TextLeft, Y, ContentWidth,
+              Block.SourceMap);
           finally
             CanvasState.Restore;
           end;
