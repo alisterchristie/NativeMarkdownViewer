@@ -7,7 +7,8 @@ uses
   System.Classes,
   Vcl.Controls,
   Vcl.Forms,
-  MarkdownViewerVCL;
+  MarkdownViewerVCL,
+  MarkdownViewer.Model;
 
 type
   TTestMarkDownViewer = class(TMarkDownViewer)
@@ -15,8 +16,10 @@ type
     procedure PressKey(Value: Word; Shift: TShiftState = []);
     procedure TypeCharacter(Value: Char);
     procedure ClickMouse(X, Y: Integer);
+    procedure DoubleClickMouse(X, Y: Integer);
     procedure DragMouse(X1, Y1, X2, Y2: Integer);
     function HoverShowsLink(X, Y: Integer): Boolean;
+    function GetRunContainingCaret: TMarkDownTextRun;
   end;
 
   [TestFixture]
@@ -214,6 +217,8 @@ type
     [Test]
     procedure SelectWordAtCaretSelectsWord;
     [Test]
+    procedure DoubleClickSelectsWord;
+    [Test]
     procedure EnterContinuesBulletList;
     [Test]
     procedure EnterIncrementsOrderedList;
@@ -298,6 +303,20 @@ function TTestMarkDownViewer.HoverShowsLink(X, Y: Integer): Boolean;
 begin
   MouseMove([], X, Y);
   Result := Cursor = crHandPoint;
+end;
+
+procedure TTestMarkDownViewer.DoubleClickMouse(X, Y: Integer);
+begin
+  MouseDown(mbLeft, [], X, Y);
+  MouseUp(mbLeft, [], X, Y);
+  MouseDown(mbLeft, [ssDouble], X, Y);
+  DblClick;
+  MouseUp(mbLeft, [], X, Y);
+end;
+
+function TTestMarkDownViewer.GetRunContainingCaret: TMarkDownTextRun;
+begin
+  Result := RunContainingCaret;
 end;
 
 procedure TMarkDownViewerTests.HandleViewerChange(Sender: TObject);
@@ -1873,6 +1892,29 @@ begin
   for I := 1 to 8 do
     FViewer.PressKey(VK_RIGHT);
   FViewer.SelectWordAtCaret;
+
+  Assert.AreEqual('bravo', FViewer.SelectedText);
+end;
+
+procedure TMarkDownViewerTests.DoubleClickSelectsWord;
+var
+  I: Integer;
+  Run: TMarkDownTextRun;
+  X, Y: Integer;
+begin
+  ShowViewer(400, 300);
+  FViewer.MarkdownText := 'alpha bravo charlie';
+  RepaintViewer;
+
+  // Move caret into 'bravo' (index 8)
+  for I := 1 to 8 do
+    FViewer.PressKey(VK_RIGHT);
+
+  Run := FViewer.GetRunContainingCaret;
+  X := Run.Rect.Left + FViewer.Canvas.TextWidth(Copy(Run.Text, 1, 8 - Run.StartIndex)) - 4;
+  Y := Run.Rect.Top + (Run.Rect.Bottom - Run.Rect.Top) div 2;
+
+  FViewer.DoubleClickMouse(X, Y);
 
   Assert.AreEqual('bravo', FViewer.SelectedText);
 end;

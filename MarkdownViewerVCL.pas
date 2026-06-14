@@ -241,7 +241,6 @@ type
     procedure FinishEditAtSource(ASourcePos: Integer);
     procedure SetCaret(NewPosition: Integer; ExtendSelection: Boolean);
     procedure CollapseSelectionToEdge(Direction: Integer; ExtendSelection: Boolean);
-    function RunContainingCaret: TMarkDownTextRun;
     procedure EnsureDesiredCaretX(const ARun: TMarkDownTextRun);
     function HandleCtrlKey(Key: Word; Shift: TShiftState): Boolean;
     function HandleEditingKey(Key: Word; Shift: TShiftState): Boolean;
@@ -285,6 +284,7 @@ type
     function GetCodeBlockRect(Index: Integer): TRect; overload;
     function GetCodeBlockCopyBtnRect(Index: Integer): TRect; overload;
     function IsCopyButtonHovered: Boolean;
+    function RunContainingCaret: TMarkDownTextRun;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -4627,6 +4627,8 @@ begin
     Exit;
   FSelectionAnchor := L;
   FSelectionCaret := R;
+  FSelecting := False;
+  MouseCapture := False;
   FDesiredCaretX := -1;
   Invalidate;
 end;
