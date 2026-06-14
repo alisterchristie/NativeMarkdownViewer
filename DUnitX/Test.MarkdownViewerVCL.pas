@@ -166,6 +166,14 @@ type
     [Test]
     procedure CtrlTAndCtrlHFormatting;
     [Test]
+    procedure AutoPairsOpeningBracketsAndQuotes;
+    [Test]
+    procedure PreventsAutoPairingQuotesAfterWordChars;
+    [Test]
+    procedure StepsOverClosingBracketsAndQuotes;
+    [Test]
+    procedure BackspaceDeletesBracketAndQuotePairs;
+    [Test]
     procedure TabOnHeadingPreservesCaretColumn;
     [Test]
     procedure ReadOnlyArrowKeysScroll;
@@ -1428,6 +1436,186 @@ begin
   Assert.AreEqual('Hello', TrimRight(FViewer.MarkdownText));
 end;
 
+procedure TMarkDownViewerTests.AutoPairsOpeningBracketsAndQuotes;
+begin
+  ShowViewer(400, 300);
+  FViewer.ReadOnly := False;
+
+  // Test '(' -> '()'
+  FViewer.MarkdownText := '';
+  RepaintViewer;
+  FViewer.TypeCharacter('(');
+  Assert.AreEqual('()', TrimRight(FViewer.MarkdownText));
+
+  // Test '[' -> '[]'
+  FViewer.MarkdownText := '';
+  RepaintViewer;
+  FViewer.TypeCharacter('[');
+  Assert.AreEqual('[]', TrimRight(FViewer.MarkdownText));
+
+  // Test '{' -> '{}'
+  FViewer.MarkdownText := '';
+  RepaintViewer;
+  FViewer.TypeCharacter('{');
+  Assert.AreEqual('{}', TrimRight(FViewer.MarkdownText));
+
+  // Test '"' -> '""'
+  FViewer.MarkdownText := '';
+  RepaintViewer;
+  FViewer.TypeCharacter('"');
+  Assert.AreEqual('""', TrimRight(FViewer.MarkdownText));
+
+  // Test single quote -> ''''
+  FViewer.MarkdownText := '';
+  RepaintViewer;
+  FViewer.TypeCharacter('''');
+  Assert.AreEqual('''''', TrimRight(FViewer.MarkdownText));
+
+  // Test backtick -> '``'
+  FViewer.MarkdownText := '';
+  RepaintViewer;
+  FViewer.TypeCharacter('`');
+  Assert.AreEqual('``', TrimRight(FViewer.MarkdownText));
+
+  // Test selection wrapping with single quotes
+  FViewer.MarkdownText := 'hello';
+  RepaintViewer;
+  FViewer.PressKey(Ord('A'), [ssCtrl]);
+  FViewer.TypeCharacter('''');
+  Assert.AreEqual('''hello''', TrimRight(FViewer.MarkdownText));
+
+  // Test selection wrapping with backticks
+  FViewer.MarkdownText := 'hello';
+  RepaintViewer;
+  FViewer.PressKey(Ord('A'), [ssCtrl]);
+  FViewer.TypeCharacter('`');
+  Assert.AreEqual('`hello`', TrimRight(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.PreventsAutoPairingQuotesAfterWordChars;
+begin
+  ShowViewer(400, 300);
+  FViewer.ReadOnly := False;
+
+  // Type a word char 'a', then type single quote ''''
+  FViewer.MarkdownText := '';
+  RepaintViewer;
+  FViewer.TypeCharacter('a');
+  FViewer.TypeCharacter('''');
+  Assert.AreEqual('a''', TrimRight(FViewer.MarkdownText));
+
+  // Type a word char 'x', then type double quote '"'
+  FViewer.MarkdownText := '';
+  RepaintViewer;
+  FViewer.TypeCharacter('x');
+  FViewer.TypeCharacter('"');
+  Assert.AreEqual('x"', TrimRight(FViewer.MarkdownText));
+
+  // Non-word char like '-' should still auto-pair single quote
+  FViewer.MarkdownText := '';
+  RepaintViewer;
+  FViewer.TypeCharacter('-');
+  FViewer.TypeCharacter('''');
+  Assert.AreEqual('-''''', TrimRight(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.StepsOverClosingBracketsAndQuotes;
+begin
+  ShowViewer(400, 300);
+  FViewer.ReadOnly := False;
+
+  // Type '(' -> inserts '()', caret is in between.
+  // Then type ')' -> should step over ')' rather than inserting another.
+  FViewer.MarkdownText := '';
+  RepaintViewer;
+  FViewer.TypeCharacter('(');
+  FViewer.TypeCharacter(')');
+  Assert.AreEqual('()', TrimRight(FViewer.MarkdownText));
+
+  // Type '[' then ']'
+  FViewer.MarkdownText := '';
+  RepaintViewer;
+  FViewer.TypeCharacter('[');
+  FViewer.TypeCharacter(']');
+  Assert.AreEqual('[]', TrimRight(FViewer.MarkdownText));
+
+  // Type '{' then '}'
+  FViewer.MarkdownText := '';
+  RepaintViewer;
+  FViewer.TypeCharacter('{');
+  FViewer.TypeCharacter('}');
+  Assert.AreEqual('{}', TrimRight(FViewer.MarkdownText));
+
+  // Type '"' then '"'
+  FViewer.MarkdownText := '';
+  RepaintViewer;
+  FViewer.TypeCharacter('"');
+  FViewer.TypeCharacter('"');
+  Assert.AreEqual('""', TrimRight(FViewer.MarkdownText));
+
+  // Type '''' then ''''
+  FViewer.MarkdownText := '';
+  RepaintViewer;
+  FViewer.TypeCharacter('''');
+  FViewer.TypeCharacter('''');
+  Assert.AreEqual('''''', TrimRight(FViewer.MarkdownText));
+
+  // Type '`' then '`'
+  FViewer.MarkdownText := '';
+  RepaintViewer;
+  FViewer.TypeCharacter('`');
+  FViewer.TypeCharacter('`');
+  Assert.AreEqual('``', TrimRight(FViewer.MarkdownText));
+end;
+
+procedure TMarkDownViewerTests.BackspaceDeletesBracketAndQuotePairs;
+begin
+  ShowViewer(400, 300);
+  FViewer.ReadOnly := False;
+
+  // Type '(' -> inserts '()', caret is in between. Press Backspace -> deletes both.
+  FViewer.MarkdownText := '';
+  RepaintViewer;
+  FViewer.TypeCharacter('(');
+  FViewer.PressKey(VK_BACK);
+  Assert.AreEqual('', TrimRight(FViewer.MarkdownText));
+
+  // Type '[' then Backspace
+  FViewer.MarkdownText := '';
+  RepaintViewer;
+  FViewer.TypeCharacter('[');
+  FViewer.PressKey(VK_BACK);
+  Assert.AreEqual('', TrimRight(FViewer.MarkdownText));
+
+  // Type '{' then Backspace
+  FViewer.MarkdownText := '';
+  RepaintViewer;
+  FViewer.TypeCharacter('{');
+  FViewer.PressKey(VK_BACK);
+  Assert.AreEqual('', TrimRight(FViewer.MarkdownText));
+
+  // Type '"' then Backspace
+  FViewer.MarkdownText := '';
+  RepaintViewer;
+  FViewer.TypeCharacter('"');
+  FViewer.PressKey(VK_BACK);
+  Assert.AreEqual('', TrimRight(FViewer.MarkdownText));
+
+  // Type '''' then Backspace
+  FViewer.MarkdownText := '';
+  RepaintViewer;
+  FViewer.TypeCharacter('''');
+  FViewer.PressKey(VK_BACK);
+  Assert.AreEqual('', TrimRight(FViewer.MarkdownText));
+
+  // Type '`' then Backspace
+  FViewer.MarkdownText := '';
+  RepaintViewer;
+  FViewer.TypeCharacter('`');
+  FViewer.PressKey(VK_BACK);
+  Assert.AreEqual('', TrimRight(FViewer.MarkdownText));
+end;
+
 procedure TMarkDownViewerTests.ReadOnlyArrowKeysScroll;
 var
   I: Integer;
@@ -1643,10 +1831,10 @@ begin
   FViewer.MarkdownText := 'ab';
   RepaintViewer;
 
-  // No selection: an opener is inserted literally, not paired.
+  // With auto-pairing, typing an opener without selection inserts the pair.
   FViewer.TypeCharacter('(');
 
-  Assert.AreEqual('(ab', Trim(FViewer.MarkdownText));
+  Assert.AreEqual('()ab', Trim(FViewer.MarkdownText));
 end;
 
 procedure TMarkDownViewerTests.ToggleStrikethroughWrapsSelection;

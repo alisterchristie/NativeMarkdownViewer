@@ -1264,6 +1264,13 @@ end;
 procedure TMarkDownViewer.KeyPress(var Key: Char);
 var
   Wrapped: Boolean;
+  OldSourcePos: Integer;
+  SourceText: string;
+  PrevChar: Char;
+  NextChar: Char;
+  PairChar: Char;
+  IsOpening: Boolean;
+  IsClosing: Boolean;
 begin
   inherited KeyPress(Key);
   if FReadOnly then
@@ -1280,16 +1287,75 @@ begin
     #32..#65535:
       begin
         // Typing an opening bracket/quote over a selection wraps it.
-        case Key of
-          '(': Wrapped := WrapSelectionWith('(', ')');
-          '[': Wrapped := WrapSelectionWith('[', ']');
-          '{': Wrapped := WrapSelectionWith('{', '}');
-          '"': Wrapped := WrapSelectionWith('"', '"');
-        else
-          Wrapped := False;
+        if HasSelection then
+        begin
+          case Key of
+            '(': Wrapped := WrapSelectionWith('(', ')');
+            '[': Wrapped := WrapSelectionWith('[', ']');
+            '{': Wrapped := WrapSelectionWith('{', '}');
+            '"': Wrapped := WrapSelectionWith('"', '"');
+            '''': Wrapped := WrapSelectionWith('''', '''');
+            '`': Wrapped := WrapSelectionWith('`', '`');
+          else
+            Wrapped := False;
+          end;
+          if not Wrapped then
+            InsertTextAtSelection(Key);
+          Key := #0;
+          Exit;
         end;
-        if not Wrapped then
-          InsertTextAtSelection(Key);
+
+        // No selection: check for over-typing skip or auto-pairing
+        OldSourcePos := SelectableToSourcePosition(FSelectionCaret);
+        SourceText := FMarkdown.Text;
+        
+        // Find next character (if any) and previous character (if any)
+        if (OldSourcePos >= 0) and (OldSourcePos < Length(SourceText)) then
+          NextChar := SourceText[OldSourcePos + 1]
+        else
+          NextChar := #0;
+
+        if (OldSourcePos > 0) and (OldSourcePos <= Length(SourceText)) then
+          PrevChar := SourceText[OldSourcePos]
+        else
+          PrevChar := #0;
+
+        // 1. Check for over-typing skip (step over existing closing character)
+        IsClosing := CharInSet(Key, [')', ']', '}', '"', '''', '`']);
+        if IsClosing and (NextChar = Key) then
+        begin
+          FinishEditAtSource(OldSourcePos + 1);
+          Key := #0;
+          Exit;
+        end;
+
+        // 2. Check for auto-pairing
+        IsOpening := CharInSet(Key, ['(', '[', '{', '"', '''', '`']);
+        if IsOpening then
+        begin
+          // For quote characters, skip auto-pairing if preceded by a word character
+          if CharInSet(Key, ['"', '''']) and CharInSet(PrevChar, ['a'..'z', 'A'..'Z', '0'..'9', '_']) then
+          begin
+            InsertTextAtSelection(Key);
+            Key := #0;
+            Exit;
+          end;
+
+          case Key of
+            '(': PairChar := ')';
+            '[': PairChar := ']';
+            '{': PairChar := '}';
+          else
+            PairChar := Key; // symmetric quotes: ", ', `
+          end;
+
+          InsertTextAtSelection(Key + PairChar);
+          FinishEditAtSource(OldSourcePos + 1);
+          Key := #0;
+          Exit;
+        end;
+
+        InsertTextAtSelection(Key);
         Key := #0;
       end;
   end;
@@ -1534,6 +1600,12 @@ begin
 end;
 
 procedure TMarkDownViewer.DeleteSelectionOrCharacter(Backwards: Boolean);
+var
+  SourcePos: Integer;
+  SourceText: string;
+  PrevChar: Char;
+  NextChar: Char;
+  IsPair: Boolean;
 begin
   if HasSelection then
   begin
@@ -1543,8 +1615,47 @@ begin
 
   if Backwards then
   begin
+    // Check for backticks pair first, as it can occur when FSelectionCaret is 0 (since backticks are hidden markup)
+    SourcePos := SelectableToSourcePosition(FSelectionCaret);
+    SourceText := FMarkdown.Text;
+    if (SourcePos >= 0) and (SourcePos + 1 < Length(SourceText)) then
+    begin
+      if (SourceText[SourcePos + 1] = '`') and (SourceText[SourcePos + 2] = '`') then
+      begin
+        PushUndoState;
+        Delete(SourceText, SourcePos + 1, 2);
+        ApplyMarkdownText(SourceText);
+        FinishEditAtSource(SourcePos);
+        Exit;
+      end;
+    end;
+
     if FSelectionCaret = 0 then
       Exit;
+
+    SourcePos := SelectableToSourcePosition(FSelectionCaret);
+    SourceText := FMarkdown.Text;
+    if (SourcePos > 0) and (SourcePos < Length(SourceText)) then
+    begin
+      PrevChar := SourceText[SourcePos];
+      NextChar := SourceText[SourcePos + 1];
+      IsPair := False;
+      if (PrevChar = '(') and (NextChar = ')') then IsPair := True
+      else if (PrevChar = '[') and (NextChar = ']') then IsPair := True
+      else if (PrevChar = '{') and (NextChar = '}') then IsPair := True
+      else if (PrevChar = '"') and (NextChar = '"') then IsPair := True
+      else if (PrevChar = '''') and (NextChar = '''') then IsPair := True;
+
+      if IsPair then
+      begin
+        PushUndoState;
+        Delete(SourceText, SourcePos, 2);
+        ApplyMarkdownText(SourceText);
+        FinishEditAtSource(SourcePos - 1);
+        Exit;
+      end;
+    end;
+
     FSelectionAnchor := FSelectionCaret - 1;
     if (FSelectionCaret >= 2) and
       (((FSelectableText[FSelectionCaret] = #10) and
