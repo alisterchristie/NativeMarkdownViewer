@@ -445,7 +445,7 @@ end;
 constructor TMarkDownViewer.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
-  ControlStyle := ControlStyle + [csOpaque, csCaptureMouse];
+  ControlStyle := ControlStyle + [csOpaque, csCaptureMouse, csDoubleClicks];
   DoubleBuffered := True;
   Width := 360;
   Height := 260;
