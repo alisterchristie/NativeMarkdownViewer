@@ -15,6 +15,12 @@
         <Projects Include="Tools\MarkdownRender\MarkdownRender.dproj">
             <Dependencies/>
         </Projects>
+        <Projects Include="HighlighterTest\HighlighterTest.dproj">
+            <Dependencies/>
+        </Projects>
+        <Projects Include="IDEStringHighlighter\MultiLineStringSyntaxHighlighter.dproj">
+            <Dependencies/>
+        </Projects>
     </ItemGroup>
     <ProjectExtensions>
         <Borland.Personality>Default.Personality.12</Borland.Personality>
@@ -59,14 +65,32 @@
     <Target Name="MarkdownRender:Make">
         <MSBuild Projects="Tools\MarkdownRender\MarkdownRender.dproj" Targets="Make"/>
     </Target>
+    <Target Name="HighlighterTest">
+        <MSBuild Projects="HighlighterTest\HighlighterTest.dproj"/>
+    </Target>
+    <Target Name="HighlighterTest:Clean">
+        <MSBuild Projects="HighlighterTest\HighlighterTest.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="HighlighterTest:Make">
+        <MSBuild Projects="HighlighterTest\HighlighterTest.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="MultiLineStringSyntaxHighlighter">
+        <MSBuild Projects="IDEStringHighlighter\MultiLineStringSyntaxHighlighter.dproj"/>
+    </Target>
+    <Target Name="MultiLineStringSyntaxHighlighter:Clean">
+        <MSBuild Projects="IDEStringHighlighter\MultiLineStringSyntaxHighlighter.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="MultiLineStringSyntaxHighlighter:Make">
+        <MSBuild Projects="IDEStringHighlighter\MultiLineStringSyntaxHighlighter.dproj" Targets="Make"/>
+    </Target>
     <Target Name="Build">
-        <CallTarget Targets="KaiMarkdownViewer;MarkdownViewerDemo;MarkdownViewerTests;MarkdownRender"/>
+        <CallTarget Targets="KaiMarkdownViewer;MarkdownViewerDemo;MarkdownViewerTests;MarkdownRender;HighlighterTest;MultiLineStringSyntaxHighlighter"/>
     </Target>
     <Target Name="Clean">
-        <CallTarget Targets="KaiMarkdownViewer:Clean;MarkdownViewerDemo:Clean;MarkdownViewerTests:Clean;MarkdownRender:Clean"/>
+        <CallTarget Targets="KaiMarkdownViewer:Clean;MarkdownViewerDemo:Clean;MarkdownViewerTests:Clean;MarkdownRender:Clean;HighlighterTest:Clean;MultiLineStringSyntaxHighlighter:Clean"/>
     </Target>
     <Target Name="Make">
-        <CallTarget Targets="KaiMarkdownViewer:Make;MarkdownViewerDemo:Make;MarkdownViewerTests:Make;MarkdownRender:Make"/>
+        <CallTarget Targets="KaiMarkdownViewer:Make;MarkdownViewerDemo:Make;MarkdownViewerTests:Make;MarkdownRender:Make;HighlighterTest:Make;MultiLineStringSyntaxHighlighter:Make"/>
     </Target>
     <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
 </Project>
